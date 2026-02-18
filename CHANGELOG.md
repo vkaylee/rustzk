@@ -16,6 +16,10 @@ All notable changes to this project will be documented in this file.
 - Byte alignment and padding issues in User record parsing.
 - Improved authentication error reporting when device returns `CMD_ACK_UNAUTH`.
 
+## [0.1.3] - 2026-02-18
+### Fixed
+- Fixed Clippy warnings and formatting issues to satisfy CI.
+
 ## [0.1.2] - 2026-02-18
 ### Added
 - Comprehensive integration tests for authentication handshake.

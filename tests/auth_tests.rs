@@ -1,4 +1,3 @@
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::ZK;
@@ -32,31 +31,44 @@ fn test_auth_handshake_mock() {
                 CMD_CONNECT => {
                     // Respond with UNAUTH to trigger client auth flow
                     let res = ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 CMD_AUTH => {
                     // Check if payload has 4 bytes (commkey)
                     if packet.payload.len() == 4 {
                         authenticated = true;
                         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                        stream
+                            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                            .unwrap();
                     } else {
                         let res = ZKPacket::new(CMD_ACK_ERROR, session_id, packet.reply_id, vec![]);
-                        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                        stream
+                            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                            .unwrap();
                     }
                 }
                 CMD_EXIT => {
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                     break;
                 }
                 _ => {
                     if authenticated {
                         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                        stream
+                            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                            .unwrap();
                     } else {
-                        let res = ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id, vec![]);
-                        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                        let res =
+                            ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id, vec![]);
+                        stream
+                            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                            .unwrap();
                     }
                 }
             }
@@ -65,7 +77,7 @@ fn test_auth_handshake_mock() {
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.set_password(0); // Using default pass 0
-    
+
     // connect() should handle CMD_ACK_UNAUTH and send CMD_AUTH automatically
     let res = zk.connect(true);
     assert!(res.is_ok(), "Connection with auth should succeed");

@@ -86,7 +86,7 @@ impl ZK {
             if (key & (1 << i)) != 0 {
                 k = (k << 1) | 1;
             } else {
-                k = k << 1;
+                k <<= 1;
             }
         }
         k = k.wrapping_add(session_id as u32);
@@ -99,10 +99,10 @@ impl ZK {
         let k = (b1 as u16) | ((b2 as u16) << 8);
         let k2 = (b3 as u16) | ((b4 as u16) << 8);
 
-        let c1 = (k2 & 0xFF) as u8 ^ ticks;       // b3 ^ ticks
+        let c1 = (k2 & 0xFF) as u8 ^ ticks; // b3 ^ ticks
         let c2 = ((k2 >> 8) & 0xFF) as u8 ^ ticks; // b4 ^ ticks
         let c3 = ticks;
-        let c4 = ((k >> 8) & 0xFF) as u8 ^ ticks;  // b2 ^ ticks
+        let c4 = ((k >> 8) & 0xFF) as u8 ^ ticks; // b2 ^ ticks
 
         vec![c1, c2, c3, c4]
     }
@@ -148,7 +148,7 @@ impl ZK {
 
     pub fn send_command(&mut self, command: u16, payload: Vec<u8>) -> ZKResult<ZKPacket> {
         self.reply_id = self.reply_id.wrapping_add(1);
-        if self.reply_id >= USHRT_MAX {
+        if self.reply_id == USHRT_MAX {
             self.reply_id -= USHRT_MAX;
         }
 
@@ -717,9 +717,9 @@ mod tests {
         let session_id = 9999;
         let ticks = 100;
         let result = ZK::make_commkey(key, session_id, ticks);
-        
+
         // Let's use the known outcome for key=0 from our previous successful generation as a baseline
-        // and add one more known verifiable point if we had it. 
+        // and add one more known verifiable point if we had it.
         // For now, I'll trust the logic based on the 0.1.0 baseline match.
         assert_eq!(result.len(), 4);
     }
