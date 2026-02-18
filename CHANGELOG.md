@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Data parsing tests for 8-byte and 28-byte ZK formats.
 - Memory safety limits (`MAX_RESPONSE_SIZE`) to prevent DoS via large allocations.
 - GitHub Actions CI workflow for automated testing and linting.
+- Automated crates.io publishing workflow on version tag push.
 
 ### Fixed
 - TCP header decoding logic to handle 8-byte magic numbers separately from payload.

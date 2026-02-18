@@ -15,3 +15,7 @@
 ## Testing Suite
 - **`tests/client_tests.rs`**: Integration tests using a stateful Mock Server to verify full connection and data retrieval flows.
 - **`tests/parsing_tests.rs`**: Unit tests for decoding raw byte streams into model structures.
+
+## CI/CD Workflows
+- **`.github/workflows/ci.yml`**: Runs CI checks on every push/PR to master.
+- **`.github/workflows/publish.yml`**: Automatically publishes to crates.io when a version tag (`v*`) is pushed.
