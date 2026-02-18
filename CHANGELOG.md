@@ -16,6 +16,10 @@ All notable changes to this project will be documented in this file.
 - Byte alignment and padding issues in User record parsing.
 - Improved authentication error reporting when device returns `CMD_ACK_UNAUTH`.
 
+## [0.1.5] - 2026-02-18
+### Added
+- Credits and references to the original `fananimi/pyzk` library.
+
 ## [0.1.4] - 2026-02-18
 ### Fixed
 - Fixed Crates.io publish workflow (deprecated flag and dirty state).

@@ -15,3 +15,6 @@ Port the `pyzk2` Python library to Rust to provide a safe, fast, and concurrent 
 ## Requirements
 - Rust 1.70+
 - Dependencies: `chrono`, `byteorder`, `thiserror`, `bitflags`
+
+## References
+This project is ported from the [fananimi/pyzk](https://github.com/fananimi/pyzk) Python library.

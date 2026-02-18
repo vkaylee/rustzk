@@ -59,3 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## 📜 License
 
 MIT
+
+## 🙏 Acknowledgements
+
+This project is a Rust port of the [pyzk](https://github.com/fananimi/pyzk) library. Special thanks to the original authors for their work on the ZK protocol implementation.
