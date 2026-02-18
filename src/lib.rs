@@ -402,11 +402,11 @@ impl ZK {
         let mut payload = Vec::new();
         payload.write_u8(1)?; // ZK6/8 flag?
         payload.write_u16::<byteorder::LittleEndian>(command)?;
-        payload.write_u8(fct)?;
+        payload.write_u32::<byteorder::LittleEndian>(fct as u32)?;
         payload.write_u32::<byteorder::LittleEndian>(ext)?;
 
         let res = self.send_command(_CMD_PREPARE_BUFFER, payload)?;
-        if res.command == CMD_DATA {
+    if res.command == CMD_DATA {
             return Ok(res.payload);
         }
 
