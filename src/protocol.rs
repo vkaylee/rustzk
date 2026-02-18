@@ -1,6 +1,6 @@
+use crate::constants::*;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Cursor};
-use crate::constants::*;
 
 /// Calculates the ZK protocol checksum for the given data.
 pub fn calculate_checksum(data: &[u8]) -> u16 {
@@ -84,7 +84,10 @@ impl ZKPacket {
 
     pub fn from_bytes(data: &[u8]) -> io::Result<Self> {
         if data.len() < 8 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Packet too short"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Packet too short",
+            ));
         }
         let mut rdr = Cursor::new(data);
         let command = rdr.read_u16::<LittleEndian>()?;
@@ -108,8 +111,10 @@ pub struct TCPWrapper;
 impl TCPWrapper {
     pub fn wrap(packet: &[u8]) -> Vec<u8> {
         let mut buf = Vec::new();
-        buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1).unwrap();
-        buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2).unwrap();
+        buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)
+            .unwrap();
         buf.write_u32::<LittleEndian>(packet.len() as u32).unwrap();
         buf.extend_from_slice(packet);
         buf
@@ -119,7 +124,10 @@ impl TCPWrapper {
         let (_length, total_len) = Self::decode_header(data)?;
 
         if data.len() < total_len {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "TCP packet incomplete"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "TCP packet incomplete",
+            ));
         }
 
         Ok((&data[8..total_len], total_len))
@@ -127,7 +135,10 @@ impl TCPWrapper {
 
     pub fn decode_header(data: &[u8]) -> io::Result<(usize, usize)> {
         if data.len() < 8 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "TCP header too short"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "TCP header too short",
+            ));
         }
         let mut rdr = Cursor::new(data);
         let magic1 = rdr.read_u16::<LittleEndian>()?;
@@ -135,7 +146,10 @@ impl TCPWrapper {
         let length = rdr.read_u32::<LittleEndian>()? as usize;
 
         if magic1 != MACHINE_PREPARE_DATA_1 || magic2 != MACHINE_PREPARE_DATA_2 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid TCP magic numbers"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid TCP magic numbers",
+            ));
         }
 
         Ok((length, 8 + length))

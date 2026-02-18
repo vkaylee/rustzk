@@ -1,15 +1,15 @@
+use chrono::NaiveDate;
 use rustzk::models::User;
 use rustzk::ZK;
-use chrono::NaiveDate;
 
 #[test]
 fn test_parse_attendance_8bytes() {
     let time_bytes = 839845230u32.to_le_bytes();
-    
+
     let decoded_time = ZK::decode_time(&time_bytes).unwrap();
     let expected_date = NaiveDate::from_ymd_opt(2026, 2, 18).unwrap();
     let expected_time = expected_date.and_hms_opt(10, 20, 30).unwrap();
-    
+
     assert_eq!(decoded_time, expected_time);
 }
 
@@ -18,7 +18,7 @@ fn test_parse_user_28bytes() {
     // Format: <HB5s8sIxBHI
     let mut data = vec![0x01, 0x00, 0x0E]; // UID: 1, Priv: 14 (Admin)
     data.extend_from_slice(b"123\0\0"); // Pass
-    data.extend_from_slice(b"John\0\0\0"); // Name (8 bytes)
+    data.extend_from_slice(b"John\0\0\0\0"); // Name (8 bytes)
     data.extend_from_slice(&123456u32.to_le_bytes()); // Card
     data.push(0x00); // Pad
     data.push(0x01); // Group
@@ -26,7 +26,7 @@ fn test_parse_user_28bytes() {
     data.extend_from_slice(&101u32.to_le_bytes()); // UserID
 
     let mut rdr = std::io::Cursor::new(&data);
-    use byteorder::{ReadBytesExt, LittleEndian};
+    use byteorder::{LittleEndian, ReadBytesExt};
     use std::io::Read;
 
     let uid = rdr.read_u16::<LittleEndian>().unwrap();
@@ -41,9 +41,13 @@ fn test_parse_user_28bytes() {
 
     let user = User {
         uid,
-        name: String::from_utf8_lossy(&name_bytes).trim_matches('\0').to_string(),
+        name: String::from_utf8_lossy(&name_bytes)
+            .trim_matches('\0')
+            .to_string(),
         privilege,
-        password: String::from_utf8_lossy(&password_bytes).trim_matches('\0').to_string(),
+        password: String::from_utf8_lossy(&password_bytes)
+            .trim_matches('\0')
+            .to_string(),
         group_id: group_id.to_string(),
         user_id: "101".to_string(),
         card,

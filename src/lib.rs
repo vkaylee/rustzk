@@ -2,15 +2,15 @@ pub mod constants;
 pub mod models;
 pub mod protocol;
 
+use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, UdpSocket};
 use std::time::Duration;
 use thiserror::Error;
-use byteorder::{ReadBytesExt, WriteBytesExt, ByteOrder};
 
 use crate::constants::*;
-use crate::protocol::{ZKPacket, TCPWrapper};
-use crate::models::{User, Attendance};
+use crate::models::{Attendance, User};
+use crate::protocol::{TCPWrapper, ZKPacket};
 
 #[derive(Error, Debug)]
 pub enum ZKError {
@@ -95,12 +95,17 @@ impl ZK {
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_UNAUTH {
             self.session_id = res.session_id;
             if res.command == CMD_ACK_UNAUTH {
-                return Err(ZKError::Connection("Unauthorized: Password required or incorrect".into()));
+                return Err(ZKError::Connection(
+                    "Unauthorized: Password required or incorrect".into(),
+                ));
             }
             self.is_connected = true;
             Ok(())
         } else {
-            Err(ZKError::Connection(format!("Invalid response: {}", res.command)))
+            Err(ZKError::Connection(format!(
+                "Invalid response: {}",
+                res.command
+            )))
         }
     }
 
@@ -108,7 +113,10 @@ impl ZK {
         let packet = ZKPacket::new(command, self.session_id, self.reply_id, payload);
         let bytes = packet.to_bytes();
 
-        let transport = self.transport.as_mut().ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+        let transport = self
+            .transport
+            .as_mut()
+            .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
 
         match transport {
             ZKTransport::Tcp(stream) => {
@@ -117,8 +125,9 @@ impl ZK {
 
                 let mut header = [0u8; 8];
                 stream.read_exact(&mut header)?;
-                let (length, _total_len) = TCPWrapper::decode_header(&header).map_err(|e| ZKError::InvalidData(e.to_string()))?;
-                
+                let (length, _total_len) = TCPWrapper::decode_header(&header)
+                    .map_err(|e| ZKError::InvalidData(e.to_string()))?;
+
                 let mut body = vec![0u8; length];
                 stream.read_exact(&mut body)?;
 
@@ -144,8 +153,8 @@ impl ZK {
             if data.len() >= 80 {
                 let mut rdr = io::Cursor::new(&data[..80]);
                 let mut fields = [0i32; 20];
-                for i in 0..20 {
-                    fields[i] = rdr.read_i32::<byteorder::LittleEndian>()?;
+                for field in &mut fields {
+                    *field = rdr.read_i32::<byteorder::LittleEndian>()?;
                 }
                 self.users = fields[4];
                 self.fingers = fields[6];
@@ -163,7 +172,10 @@ impl ZK {
             }
             Ok(())
         } else {
-            Err(ZKError::Response(format!("Failed to read sizes: {}", res.command)))
+            Err(ZKError::Response(format!(
+                "Failed to read sizes: {}",
+                res.command
+            )))
         }
     }
 
@@ -173,16 +185,16 @@ impl ZK {
         }
         let mut rdr = io::Cursor::new(t);
         let t = rdr.read_u32::<byteorder::LittleEndian>()?;
-        
-        let second = (t % 60) as u32;
+
+        let second = t % 60;
         let t = t / 60;
-        let minute = (t % 60) as u32;
+        let minute = t % 60;
         let t = t / 60;
-        let hour = (t % 24) as u32;
+        let hour = t % 24;
         let t = t / 24;
-        let day = (t % 31 + 1) as u32;
+        let day = t % 31 + 1;
         let t = t / 31;
-        let month = (t % 12 + 1) as u32;
+        let month = t % 12 + 1;
         let t = t / 12;
         let year = (t + 2000) as i32;
 
@@ -199,21 +211,28 @@ impl ZK {
                 return Err(ZKError::InvalidData("Invalid prepare data payload".into()));
             }
             let size = byteorder::LittleEndian::read_u32(&res.payload[..4]) as usize;
-            
+
             if size > MAX_RESPONSE_SIZE {
-                return Err(ZKError::InvalidData(format!("Response size {} exceeds maximum {}", size, MAX_RESPONSE_SIZE)));
+                return Err(ZKError::InvalidData(format!(
+                    "Response size {} exceeds maximum {}",
+                    size, MAX_RESPONSE_SIZE
+                )));
             }
 
             let mut data = Vec::with_capacity(size);
             let mut remaining = size;
 
             while remaining > 0 {
-                let transport = self.transport.as_mut().ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+                let transport = self
+                    .transport
+                    .as_mut()
+                    .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
                 let chunk_res = match transport {
                     ZKTransport::Tcp(stream) => {
                         let mut header = [0u8; 8];
                         stream.read_exact(&mut header)?;
-                        let (length, _total_len) = TCPWrapper::decode_header(&header).map_err(|e| ZKError::InvalidData(e.to_string()))?;
+                        let (length, _total_len) = TCPWrapper::decode_header(&header)
+                            .map_err(|e| ZKError::InvalidData(e.to_string()))?;
 
                         let mut body = vec![0u8; length];
                         stream.read_exact(&mut body)?;
@@ -236,12 +255,18 @@ impl ZK {
                 } else if chunk_res.command == CMD_ACK_OK {
                     break;
                 } else {
-                    return Err(ZKError::Response(format!("Unexpected chunk command: {}", chunk_res.command)));
+                    return Err(ZKError::Response(format!(
+                        "Unexpected chunk command: {}",
+                        chunk_res.command
+                    )));
                 }
             }
             Ok(data)
         } else {
-            Err(ZKError::Response(format!("Invalid response for chunk: {}", res.command)))
+            Err(ZKError::Response(format!(
+                "Invalid response for chunk: {}",
+                res.command
+            )))
         }
     }
 
@@ -267,8 +292,8 @@ impl ZK {
         }
 
         if res.command != CMD_PREPARE_DATA {
-             // Some devices might return ACK_OK and wait for read_chunk
-             // But usually it's PREPARE_DATA
+            // Some devices might return ACK_OK and wait for read_chunk
+            // But usually it's PREPARE_DATA
         }
 
         let size = if res.payload.len() >= 5 {
@@ -278,7 +303,10 @@ impl ZK {
         };
 
         if size > MAX_RESPONSE_SIZE {
-            return Err(ZKError::InvalidData(format!("Buffered response size {} exceeds maximum {}", size, MAX_RESPONSE_SIZE)));
+            return Err(ZKError::InvalidData(format!(
+                "Buffered response size {} exceeds maximum {}",
+                size, MAX_RESPONSE_SIZE
+            )));
         }
 
         let max_chunk = if let Some(ZKTransport::Tcp(_)) = self.transport {
@@ -345,9 +373,13 @@ impl ZK {
 
                 users.push(User {
                     uid,
-                    name: String::from_utf8_lossy(&name_bytes).trim_matches('\0').to_string(),
+                    name: String::from_utf8_lossy(&name_bytes)
+                        .trim_matches('\0')
+                        .to_string(),
                     privilege,
-                    password: String::from_utf8_lossy(&password_bytes).trim_matches('\0').to_string(),
+                    password: String::from_utf8_lossy(&password_bytes)
+                        .trim_matches('\0')
+                        .to_string(),
                     group_id: group_id.to_string(),
                     user_id: user_id.to_string(),
                     card,
@@ -355,7 +387,7 @@ impl ZK {
                 offset += 28;
             }
         } else if self.user_packet_size == 72 {
-             while offset + 72 <= data.len() {
+            while offset + 72 <= data.len() {
                 let chunk = &data[offset..offset + 72];
                 let mut rdr = io::Cursor::new(chunk);
                 let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
@@ -372,11 +404,19 @@ impl ZK {
 
                 users.push(User {
                     uid,
-                    name: String::from_utf8_lossy(&name_bytes).trim_matches('\0').to_string(),
+                    name: String::from_utf8_lossy(&name_bytes)
+                        .trim_matches('\0')
+                        .to_string(),
                     privilege,
-                    password: String::from_utf8_lossy(&password_bytes).trim_matches('\0').to_string(),
-                    group_id: String::from_utf8_lossy(&group_id_bytes).trim_matches('\0').to_string(),
-                    user_id: String::from_utf8_lossy(&user_id_bytes).trim_matches('\0').to_string(),
+                    password: String::from_utf8_lossy(&password_bytes)
+                        .trim_matches('\0')
+                        .to_string(),
+                    group_id: String::from_utf8_lossy(&group_id_bytes)
+                        .trim_matches('\0')
+                        .to_string(),
+                    user_id: String::from_utf8_lossy(&user_id_bytes)
+                        .trim_matches('\0')
+                        .to_string(),
                     card,
                 });
                 offset += 72;
@@ -416,7 +456,8 @@ impl ZK {
                 let punch = rdr.read_u8()?;
 
                 let timestamp = ZK::decode_time(&time_bytes)?;
-                let user_id = users.iter()
+                let user_id = users
+                    .iter()
                     .find(|u| u.uid == uid)
                     .map(|u| u.user_id.clone())
                     .unwrap_or_else(|| uid.to_string());
@@ -440,10 +481,11 @@ impl ZK {
                 let status = rdr.read_u8()?;
                 let punch = rdr.read_u8()?;
                 // reserved 2 bytes, workcode 4 bytes
-                
+
                 let timestamp = ZK::decode_time(&time_bytes)?;
                 let user_id = user_id_num.to_string();
-                let uid = users.iter()
+                let uid = users
+                    .iter()
                     .find(|u| u.user_id == user_id)
                     .map(|u| u.uid as u32)
                     .unwrap_or(user_id_num);
@@ -464,7 +506,9 @@ impl ZK {
                 let mut chunk_ptr = chunk;
                 if chunk.starts_with(b"\xff255\x00\x00\x00\x00\x00") {
                     chunk_ptr = &chunk[10..];
-                    if chunk_ptr.len() < 30 { break; } // Should not happen if record_size >= 40
+                    if chunk_ptr.len() < 30 {
+                        break;
+                    } // Should not happen if record_size >= 40
                 }
 
                 let mut rdr = io::Cursor::new(chunk_ptr);
@@ -477,7 +521,9 @@ impl ZK {
                 let punch = rdr.read_u8()?;
 
                 let timestamp = ZK::decode_time(&time_bytes)?;
-                let user_id = String::from_utf8_lossy(&user_id_bytes).trim_matches('\0').to_string();
+                let user_id = String::from_utf8_lossy(&user_id_bytes)
+                    .trim_matches('\0')
+                    .to_string();
 
                 attendances.push(Attendance {
                     uid: uid as u32,
@@ -496,7 +542,9 @@ impl ZK {
     pub fn get_firmware_version(&mut self) -> ZKResult<String> {
         let res = self.send_command(CMD_GET_VERSION, Vec::new())?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
-            Ok(String::from_utf8_lossy(&res.payload).trim_matches('\0').to_string())
+            Ok(String::from_utf8_lossy(&res.payload)
+                .trim_matches('\0')
+                .to_string())
         } else {
             Err(ZKError::Response("Can't read firmware version".into()))
         }
@@ -507,7 +555,9 @@ impl ZK {
         command_string.push(0);
         let res = self.send_command(CMD_OPTIONS_RRQ, command_string)?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
-            let data = String::from_utf8_lossy(&res.payload).trim_matches('\0').to_string();
+            let data = String::from_utf8_lossy(&res.payload)
+                .trim_matches('\0')
+                .to_string();
             // Usually returns "Key=Value"
             if let Some(pos) = data.find('=') {
                 Ok(data[pos + 1..].to_string())

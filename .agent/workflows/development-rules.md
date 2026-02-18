@@ -6,7 +6,7 @@
 - **Data Consistency**: Use the constants defined in `pyzk_ref/zk/const.py` for all command codes and flags.
 
 ## Testing & Validation
-- **CI Script**: Always run `./scripts/ci.sh` to validate changes before committing. This script includes formatting checks, building, unit/integration testing, and linting.
+- **Validation**: Ensure all changes pass the following validation steps: Formatting (`cargo fmt --all -- --check`), Building (`cargo build`), Testing (`cargo test`), and Linting (`cargo clippy -- -D warnings`).
 - **Mock Server**: For any connection-related changes, verify using the mock server in `tests/client_tests.rs`.
 - **Parsing**: Ensure any change to data models passes the parsing tests in `tests/parsing_tests.rs`.
 
