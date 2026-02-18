@@ -16,32 +16,21 @@ fn main() {
         Ok(_) => {
             println!("Connected successfully!\n");
 
+            // Device info
             if let Ok(sn) = zk.get_serial_number() {
                 println!("Serial Number: {}", sn);
-            }
-            if let Ok(ver) = zk.get_firmware_version() {
-                println!("Firmware: {}", ver);
-            }
-            if let Ok(plat) = zk.get_platform() {
-                println!("Platform: {}", plat);
-            }
-            if let Ok(mac) = zk.get_mac() {
-                println!("MAC: {}", mac);
             }
             if let Ok(name) = zk.get_device_name() {
                 println!("Device Name: {}", name);
             }
-            if let Ok(time) = zk.get_time() {
-                println!("Device Time: {}", time);
-            }
 
-            // Read sizes to get counts
+            // Read sizes to get user count
             println!("\n--- Device Capacity ---");
             match zk.read_sizes() {
                 Ok(_) => {
                     println!("Users: {} / {}", zk.users, zk.users_cap);
                     println!("Fingers: {} / {}", zk.fingers, zk.fingers_cap);
-                    println!("Attendance Records: {} / {}", zk.records, zk.rec_cap);
+                    println!("Records: {} / {}", zk.records, zk.rec_cap);
                     if zk.faces_cap > 0 {
                         println!("Faces: {} / {}", zk.faces, zk.faces_cap);
                     }
@@ -53,10 +42,10 @@ fn main() {
             println!("\n--- User List ---");
             match zk.get_users() {
                 Ok(users) => {
-                    println!("Total users found: {}\n", users.len());
+                    println!("Total users: {}", users.len());
                     for user in &users {
                         println!(
-                            "  UID: {:>4} | ID: {:>10} | Name: {:>20} | Privilege: {} | Card: {}",
+                            "  UID: {}, ID: {}, Name: {}, Privilege: {}, Card: {}",
                             user.uid, user.user_id, user.name, user.privilege, user.card
                         );
                     }
