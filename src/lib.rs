@@ -406,7 +406,7 @@ impl ZK {
         payload.write_u32::<byteorder::LittleEndian>(ext)?;
 
         let res = self.send_command(_CMD_PREPARE_BUFFER, payload)?;
-    if res.command == CMD_DATA {
+        if res.command == CMD_DATA {
             return Ok(res.payload);
         }
 
@@ -457,7 +457,10 @@ impl ZK {
     }
 
     fn decode_gbk(bytes: &[u8]) -> String {
-        let trimmed = bytes.iter().position(|&x| x == 0).map_or(bytes, |i| &bytes[..i]);
+        let trimmed = bytes
+            .iter()
+            .position(|&x| x == 0)
+            .map_or(bytes, |i| &bytes[..i]);
         let (cow, _, _) = encoding_rs::GBK.decode(trimmed);
         cow.into_owned()
     }

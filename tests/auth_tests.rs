@@ -1,6 +1,6 @@
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
-use rustzk::{ZK, ZKProtocol};
+use rustzk::{ZKProtocol, ZK};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
