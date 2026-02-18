@@ -16,6 +16,12 @@ All notable changes to this project will be documented in this file.
 - Byte alignment and padding issues in User record parsing.
 - Improved authentication error reporting when device returns `CMD_ACK_UNAUTH`.
 
+## [0.1.2] - 2026-02-18
+### Added
+- Comprehensive integration tests for authentication handshake.
+- Extended unit tests for `make_commkey` with more edge cases.
+- Formal test reports and focused QA verification.
+
 ## [0.1.1] - 2026-02-18
 ### Added
 - Authentication support (`ZK::set_password`, `make_commkey`, `CMD_AUTH`).

@@ -1,7 +1,7 @@
 use rustzk::ZK;
 
 fn main() {
-    let mut zk = ZK::new("192.168.1.201", 4370);
+    let mut zk = ZK::new("192.168.12.14", 4370);
 
     println!("Connecting to ZK machine...");
     match zk.connect(true) {
