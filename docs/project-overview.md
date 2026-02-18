@@ -8,10 +8,9 @@ Port the `pyzk2` Python library to Rust to provide a safe, fast, and concurrent 
 - [x] Basic Connection (TCP/UDP)
 - [x] Device Info & Capacity
 - [x] Attendance & User Retrieval
+- [x] Comprehensive Test Suite with Device Emulator
+- [x] GitHub Actions CI/CD Pipeline
 - [ ] User Management (Add/Delete/Update)
-- [ ] Fingerprint Template Management
-- [ ] Real-time Live Capture (Events)
-- [ ] Comprehensive Test Suite with Device Emulator
 
 ## Requirements
 - Rust 1.70+
