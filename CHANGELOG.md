@@ -16,6 +16,12 @@ All notable changes to this project will be documented in this file.
 - Byte alignment and padding issues in User record parsing.
 - Improved authentication error reporting when device returns `CMD_ACK_UNAUTH`.
 
+## [0.1.1] - 2026-02-18
+### Added
+- Authentication support (`ZK::set_password`, `make_commkey`, `CMD_AUTH`).
+- Unit tests for authentication logic.
+- Documentation for password configuration.
+
 ## [0.1.0] - 2026-02-18
 ### Added
 - Initial Rust port of `pyzk2`.
