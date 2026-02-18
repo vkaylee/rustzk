@@ -49,6 +49,7 @@ pub struct ZK {
     pub rec_cap: i32,
     pub faces_cap: i32,
     pub encoding: String,
+    pub password: u32,
 }
 
 impl ZK {
@@ -71,7 +72,39 @@ impl ZK {
             rec_cap: 0,
             faces_cap: 0,
             encoding: "UTF-8".to_string(),
+            password: 0,
         }
+    }
+
+    pub fn set_password(&mut self, password: u32) {
+        self.password = password;
+    }
+
+    fn make_commkey(key: u32, session_id: u16, ticks: u8) -> Vec<u8> {
+        let mut k = 0u32;
+        for i in 0..32 {
+            if (key & (1 << i)) != 0 {
+                k = (k << 1) | 1;
+            } else {
+                k = k << 1;
+            }
+        }
+        k = k.wrapping_add(session_id as u32);
+
+        let b1 = (k & 0xFF) as u8 ^ b'Z';
+        let b2 = ((k >> 8) & 0xFF) as u8 ^ b'K';
+        let b3 = ((k >> 16) & 0xFF) as u8 ^ b'S';
+        let b4 = ((k >> 24) & 0xFF) as u8 ^ b'O';
+
+        let k = (b1 as u16) | ((b2 as u16) << 8);
+        let k2 = (b3 as u16) | ((b4 as u16) << 8);
+
+        let c1 = (k2 & 0xFF) as u8 ^ ticks;       // b3 ^ ticks
+        let c2 = ((k2 >> 8) & 0xFF) as u8 ^ ticks; // b4 ^ ticks
+        let c3 = ticks;
+        let c4 = ((k >> 8) & 0xFF) as u8 ^ ticks;  // b2 ^ ticks
+
+        vec![c1, c2, c3, c4]
     }
 
     pub fn connect(&mut self, tcp: bool) -> ZKResult<()> {
@@ -95,9 +128,13 @@ impl ZK {
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_UNAUTH {
             self.session_id = res.session_id;
             if res.command == CMD_ACK_UNAUTH {
-                return Err(ZKError::Connection(
-                    "Unauthorized: Password required or incorrect".into(),
-                ));
+                let command_string = ZK::make_commkey(self.password, self.session_id, 50);
+                let auth_res = self.send_command(CMD_AUTH, command_string)?;
+                if auth_res.command == CMD_ACK_UNAUTH {
+                    return Err(ZKError::Connection(
+                        "Unauthorized: Password required or incorrect".into(),
+                    ));
+                }
             }
             self.is_connected = true;
             Ok(())
@@ -110,6 +147,11 @@ impl ZK {
     }
 
     pub fn send_command(&mut self, command: u16, payload: Vec<u8>) -> ZKResult<ZKPacket> {
+        self.reply_id = self.reply_id.wrapping_add(1);
+        if self.reply_id >= USHRT_MAX {
+            self.reply_id -= USHRT_MAX;
+        }
+
         let packet = ZKPacket::new(command, self.session_id, self.reply_id, payload);
         let bytes = packet.to_bytes();
 
@@ -596,7 +638,7 @@ impl ZK {
     pub fn get_time(&mut self) -> ZKResult<chrono::NaiveDateTime> {
         let res = self.send_command(CMD_GET_TIME, Vec::new())?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
-            ZK::decode_time(&res.payload[..4])
+            ZK::decode_time(&res.payload)
         } else {
             Err(ZKError::Response("Can't get time".into()))
         }
@@ -636,5 +678,34 @@ impl ZK {
         }
         self.transport = None;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_make_commkey() {
+        // Key: 0, Session: 619, Ticks: 50
+        // Expected: [97, 125, 50, 123]
+        let key = 0;
+        let session_id = 619;
+        let ticks = 50;
+        let result = ZK::make_commkey(key, session_id, ticks);
+        assert_eq!(result, vec![97, 125, 50, 123]);
+    }
+
+    #[test]
+    fn test_zk_new_default_password() {
+        let zk = ZK::new("192.168.1.201", 4370);
+        assert_eq!(zk.password, 0);
+    }
+
+    #[test]
+    fn test_zk_set_password() {
+        let mut zk = ZK::new("192.168.1.201", 4370);
+        zk.set_password(12345);
+        assert_eq!(zk.password, 12345);
     }
 }
