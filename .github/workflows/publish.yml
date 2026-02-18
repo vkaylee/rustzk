@@ -22,6 +22,22 @@ jobs:
       - name: Run CI checks
         run: ./scripts/ci.sh
 
+      - name: Sync Cargo.toml version with Tag
+        shell: bash
+        run: |
+          # Extract version from tag (e.g., refs/tags/v0.2.1 -> 0.2.1)
+          # Use parameter expansion to strip 'refs/tags/v' prefix
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Syncing Cargo.toml version to $VERSION"
+          
+          # Update Cargo.toml using sed. 
+          # Matches: version = "..." -> version = "$VERSION"
+          # Ensures only the first occurrence (package version) is replaced.
+          sed -i "0,/^version = .*/s//version = \"$VERSION\"/" Cargo.toml
+          
+          # Verify the change
+          grep "^version" Cargo.toml
+
       - name: Publish to crates.io
         run: cargo publish --allow-dirty
         env:
