@@ -61,8 +61,6 @@ fn main() {
                 }
                 Err(e) => println!("Failed to get users: {}", e),
             }
-
-            let _ = zk.disconnect();
         }
         Err(e) => println!("Failed to connect: {}", e),
     }

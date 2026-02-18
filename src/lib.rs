@@ -755,11 +755,17 @@ impl ZK {
 
     pub fn disconnect(&mut self) -> ZKResult<()> {
         if self.is_connected {
-            self.send_command(CMD_EXIT, Vec::new())?;
+            let _ = self.send_command(CMD_EXIT, Vec::new());
             self.is_connected = false;
         }
         self.transport = None;
         Ok(())
+    }
+}
+
+impl Drop for ZK {
+    fn drop(&mut self) {
+        let _ = self.disconnect();
     }
 }
 
