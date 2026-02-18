@@ -2,6 +2,11 @@
 name = "rustzk"
 version = "0.1.0"
 edition = "2021"
+description = "A pure Rust implementation of the ZK protocol for attendance devices."
+license = "MIT"
+repository = "https://github.com/vkaylee/rustzk"
+keywords = ["zk", "attendance", "protocol", "iot"]
+categories = ["embedded", "network-programming"]
 
 [dependencies]
 chrono = "0.4"
