@@ -456,6 +456,12 @@ impl ZK {
         Ok(data)
     }
 
+    fn decode_gbk(bytes: &[u8]) -> String {
+        let trimmed = bytes.iter().position(|&x| x == 0).map_or(bytes, |i| &bytes[..i]);
+        let (cow, _, _) = encoding_rs::GBK.decode(trimmed);
+        cow.into_owned()
+    }
+
     pub fn get_users(&mut self) -> ZKResult<Vec<User>> {
         self.read_sizes()?;
         if self.users == 0 {
@@ -492,9 +498,7 @@ impl ZK {
 
                 users.push(User {
                     uid,
-                    name: String::from_utf8_lossy(&name_bytes)
-                        .trim_matches('\0')
-                        .to_string(),
+                    name: ZK::decode_gbk(&name_bytes),
                     privilege,
                     password: String::from_utf8_lossy(&password_bytes)
                         .trim_matches('\0')
@@ -523,9 +527,7 @@ impl ZK {
 
                 users.push(User {
                     uid,
-                    name: String::from_utf8_lossy(&name_bytes)
-                        .trim_matches('\0')
-                        .to_string(),
+                    name: ZK::decode_gbk(&name_bytes),
                     privilege,
                     password: String::from_utf8_lossy(&password_bytes)
                         .trim_matches('\0')
