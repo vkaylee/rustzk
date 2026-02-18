@@ -10,7 +10,7 @@ Add `rustzk` to your `Cargo.toml`.
 
 ```toml
 [dependencies]
-rustzk = "0.1.0"
+rustzk = "0.2.1"
 ```
 
 ### From GitHub
@@ -20,28 +20,21 @@ rustzk = "0.1.0"
 rustzk = { git = "https://github.com/vkaylee/rustzk" }
 ```
 
-### Local Path (for development within workspace)
-
-```toml
-[dependencies]
-rustzk = { path = "../rustzk" }
-```
-
 ## 🚀 Usage Example
 
 ```rust
-use rustzk::ZK;
+use rustzk::{ZK, ZKProtocol};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut zk = ZK::new("192.168.1.201", 4370);
     
     // Set password if device requires authentication (default is 0)
-    zk.set_password(12345);
+    zk.set_password(0);
     
-    // Connect to device
-    zk.connect(true)?; // true for TCP, false for UDP
+    // Connect to device (Auto-detect protocol: TCP then UDP fallback)
+    zk.connect(ZKProtocol::Auto)?;
     
-    // Get user list
+    // Get user list (Handles GBK decoding automatically)
     let users = zk.get_users()?;
     println!("Found {} users", users.len());
     
