@@ -338,6 +338,7 @@ impl ZK {
                 let mut name_bytes = [0u8; 8];
                 rdr.read_exact(&mut name_bytes)?;
                 let card = rdr.read_u32::<byteorder::LittleEndian>()?;
+                let _pad = rdr.read_u8()?;
                 let group_id = rdr.read_u8()?;
                 let _timezone = rdr.read_u16::<byteorder::LittleEndian>()?;
                 let user_id = rdr.read_u32::<byteorder::LittleEndian>()?;
