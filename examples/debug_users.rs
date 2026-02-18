@@ -1,29 +1,38 @@
-use rustzk::ZK;
+use rustzk::{ZKProtocol, ZK};
+use std::env;
 
 fn main() {
-    let addr = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "192.168.12.14".to_string());
-    let port: u16 = std::env::args()
-        .nth(2)
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(4370);
+    let args: Vec<String> = env::args().collect();
+    let (ip, port) = if args.len() >= 3 {
+        (args[1].clone(), args[2].parse().unwrap_or(4370))
+    } else {
+        ("192.168.12.14".to_string(), 4370)
+    };
 
-    let mut zk = ZK::new(&addr, port);
+    println!("Connecting to ZK device at {}:{}...", ip, port);
 
-    println!("Connecting to ZK device at {}:{}...", addr, port);
-    match zk.connect(true) {
+    let mut zk = ZK::new(&ip, port);
+
+    // Try to connect (TCP)
+    if let Err(e) = zk.connect(ZKProtocol::Auto) {
+        eprintln!("Failed to connect: {}", e);
+        std::process::exit(1);
+    }
+
+    println!("Connected successfully!\n");
+
+    // Device info
+    if let Ok(sn) = zk.get_serial_number() {
+        println!("Serial Number: {}", sn);
+    }
+    if let Ok(name) = zk.get_device_name() {
+        println!("Device Name: {}", name);
+    }
+
+    // Read sizes to get user count
+    println!("\n--- Device Capacity ---");
+    match zk.read_sizes() {
         Ok(_) => {
-            println!("Connected successfully!\n");
-
-            // Device info
-            if let Ok(sn) = zk.get_serial_number() {
-                println!("Serial Number: {}", sn);
-            }
-            if let Ok(name) = zk.get_device_name() {
-                println!("Device Name: {}", name);
-            }
-
             // Read sizes to get user count
             println!("\n--- Device Capacity ---");
             match zk.read_sizes() {

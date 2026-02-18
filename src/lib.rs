@@ -3,9 +3,12 @@ pub mod models;
 pub mod protocol;
 
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
+
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, UdpSocket};
 use std::time::Duration;
+
 use thiserror::Error;
 
 use crate::constants::*;
@@ -31,19 +34,27 @@ pub enum ZKTransport {
     Udp(UdpSocket),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ZKProtocol {
+    TCP,
+    UDP,
+    Auto,
+}
+
 pub struct ZK {
-    addr: String,
-    transport: Option<ZKTransport>,
-    session_id: u16,
-    reply_id: u16,
-    timeout: Duration,
+    pub addr: String,
+    pub transport: Option<ZKTransport>,
+    pub session_id: u16,
+    pub reply_id: u16,
+    pub timeout: Duration,
+    pub user_map: HashMap<String, String>, // Added
     pub is_connected: bool,
     pub user_packet_size: usize,
-    pub users: i32,
-    pub fingers: i32,
-    pub records: i32,
+    pub users: u32,   // Changed type
+    pub fingers: u32, // Changed type
+    pub records: u32, // Changed type
     pub cards: i32,
-    pub faces: i32,
+    pub faces: u32, // Changed type
     pub fingers_cap: i32,
     pub users_cap: i32,
     pub rec_cap: i32,
@@ -60,6 +71,7 @@ impl ZK {
             session_id: 0,
             reply_id: USHRT_MAX - 1,
             timeout: Duration::from_secs(60),
+            user_map: HashMap::new(), // Initialized
             is_connected: false,
             user_packet_size: 28,
             users: 0,
@@ -107,35 +119,72 @@ impl ZK {
         vec![c1, c2, c3, c4]
     }
 
-    pub fn connect(&mut self, tcp: bool) -> ZKResult<()> {
-        if tcp {
-            let stream = TcpStream::connect(&self.addr)?;
-            stream.set_read_timeout(Some(self.timeout))?;
-            stream.set_write_timeout(Some(self.timeout))?;
-            self.transport = Some(ZKTransport::Tcp(stream));
-        } else {
-            let socket = UdpSocket::bind("0.0.0.0:0")?;
-            socket.connect(&self.addr)?;
-            socket.set_read_timeout(Some(self.timeout))?;
-            socket.set_write_timeout(Some(self.timeout))?;
-            self.transport = Some(ZKTransport::Udp(socket));
+    /// Connect to the ZK device.
+    /// `protocol`: ZKProtocol::TCP, ZKProtocol::UDP, or ZKProtocol::Auto (try TCP then UDP)
+    pub fn connect(&mut self, protocol: ZKProtocol) -> ZKResult<()> {
+        match protocol {
+            ZKProtocol::TCP => self.connect_tcp(),
+            ZKProtocol::UDP => self.connect_udp(),
+            ZKProtocol::Auto => {
+                // Try TCP first
+                match self.connect_tcp() {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        println!("TCP connect failed: {}. Falling back to UDP...", e);
+                        self.connect_udp()
+                    }
+                }
+            }
         }
+    }
 
+    fn connect_tcp(&mut self) -> ZKResult<()> {
+        let stream = TcpStream::connect_timeout(
+            &self.addr.parse().unwrap(),
+            Duration::from_secs(5), // Short timeout for connection attempt
+        )?;
+        stream.set_read_timeout(Some(self.timeout))?;
+        stream.set_write_timeout(Some(self.timeout))?;
+
+        self.transport = Some(ZKTransport::Tcp(stream));
+        self.perform_connect_handshake()
+    }
+
+    fn connect_udp(&mut self) -> ZKResult<()> {
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        socket.connect(&self.addr)?;
+        socket.set_read_timeout(Some(self.timeout))?;
+        socket.set_write_timeout(Some(self.timeout))?;
+
+        self.transport = Some(ZKTransport::Udp(socket));
+        self.perform_connect_handshake()
+    }
+
+    fn perform_connect_handshake(&mut self) -> ZKResult<()> {
         self.session_id = 0;
         self.reply_id = USHRT_MAX - 1;
 
         let res = self.send_command(CMD_CONNECT, Vec::new())?;
+
+        // Update session_id if we got a valid response (OK or UNAUTH)
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_UNAUTH {
             self.session_id = res.session_id;
-            if res.command == CMD_ACK_UNAUTH {
-                let command_string = ZK::make_commkey(self.password, self.session_id, 50);
-                let auth_res = self.send_command(CMD_AUTH, command_string)?;
-                if auth_res.command == CMD_ACK_UNAUTH {
-                    return Err(ZKError::Connection(
-                        "Unauthorized: Password required or incorrect".into(),
-                    ));
-                }
+        }
+
+        if res.command == CMD_ACK_UNAUTH {
+            let command_string = ZK::make_commkey(self.password, self.session_id, 50);
+            let auth_res = self.send_command(CMD_AUTH, command_string)?;
+            if auth_res.command == CMD_ACK_UNAUTH {
+                return Err(ZKError::Connection(
+                    "Unauthorized: Password required or incorrect".into(),
+                ));
             }
+            self.session_id = auth_res.session_id;
+            self.is_connected = true;
+            return Ok(());
+        }
+
+        if res.command == CMD_ACK_OK {
             self.is_connected = true;
             Ok(())
         } else {
@@ -214,9 +263,9 @@ impl ZK {
                 for field in &mut fields {
                     *field = rdr.read_i32::<byteorder::LittleEndian>()?;
                 }
-                self.users = fields[4];
-                self.fingers = fields[6];
-                self.records = fields[8];
+                self.users = fields[4] as u32;
+                self.fingers = fields[6] as u32;
+                self.records = fields[8] as u32;
                 self.cards = fields[12];
                 self.fingers_cap = fields[14];
                 self.users_cap = fields[15];
@@ -224,7 +273,7 @@ impl ZK {
             }
             if data.len() >= 92 {
                 let mut rdr = io::Cursor::new(&data[80..92]);
-                self.faces = rdr.read_i32::<byteorder::LittleEndian>()?;
+                self.faces = rdr.read_i32::<byteorder::LittleEndian>()? as u32;
                 let _ = rdr.read_i32::<byteorder::LittleEndian>()?;
                 self.faces_cap = rdr.read_i32::<byteorder::LittleEndian>()?;
             }

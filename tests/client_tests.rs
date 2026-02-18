@@ -2,9 +2,9 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use chrono::Datelike;
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
-use rustzk::ZK;
+use rustzk::{ZKProtocol, ZK};
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::thread;
 
 #[test]
@@ -134,7 +134,7 @@ fn test_full_device_flow_mock() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    zk.connect(true).unwrap();
+    zk.connect(ZKProtocol::TCP).unwrap();
 
     zk.read_sizes().unwrap();
     assert_eq!(zk.users, 1, "Users should be 1");
@@ -180,7 +180,7 @@ fn test_mock_udp_connect() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    let result = zk.connect(false);
+    let result = zk.connect(ZKProtocol::UDP);
 
     assert!(result.is_ok());
     assert!(zk.is_connected);
@@ -252,7 +252,7 @@ fn test_tcp_partial_response_fragmented() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    zk.connect(true).unwrap();
+    zk.connect(ZKProtocol::TCP).unwrap();
     assert!(zk.is_connected);
 
     // get_time should work even with fragmented TCP responses
@@ -288,7 +288,7 @@ fn test_tcp_short_response_returns_error() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    let result = zk.connect(true);
+    let result = zk.connect(ZKProtocol::TCP);
 
     // Should fail with an error, NOT hang
     assert!(result.is_err());
@@ -397,7 +397,7 @@ fn test_tcp_receive_chunk_fragmented() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    zk.connect(true).unwrap();
+    zk.connect(ZKProtocol::TCP).unwrap();
 
     // get_users exercises both send_command AND receive_chunk paths
     let users = zk.get_users().unwrap();
@@ -406,5 +406,36 @@ fn test_tcp_receive_chunk_fragmented() {
     assert_eq!(users[0].user_id, "42");
 
     zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}
+
+#[test]
+fn test_connect_fallback_udp() {
+    // Pick a free port
+    let socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind UDP mock");
+    let addr = socket.local_addr().unwrap();
+    let port = addr.port();
+
+    // Spawn UDP server ONLY (no TCP listener)
+    let server_handle = thread::spawn(move || {
+        let mut buf = [0u8; 1024];
+        let (len, client_addr) = socket.recv_from(&mut buf).expect("Failed to receive UDP");
+
+        let packet = ZKPacket::from_bytes(&buf[..len]).unwrap();
+        assert_eq!(packet.command, CMD_CONNECT);
+
+        let res_packet = ZKPacket::new(CMD_ACK_OK, 9999, packet.reply_id, vec![]);
+        socket.send_to(&res_packet.to_bytes(), client_addr).unwrap();
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+
+    // This should fail TCP (refused) then succeed UDP
+    let result = zk.connect(ZKProtocol::Auto);
+
+    assert!(result.is_ok());
+    assert!(zk.is_connected);
+    // Verify it chose UDP transport (we can't easily check private field, but success implies it worked)
+
     server_handle.join().unwrap();
 }
