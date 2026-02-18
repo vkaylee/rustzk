@@ -3,10 +3,15 @@ use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let (ip, port) = if args.len() >= 3 {
-        (args[1].clone(), args[2].parse().unwrap_or(4370))
+    if args.len() < 2 {
+        eprintln!("Usage: {} <ip> [port]", args[0]);
+        std::process::exit(1);
+    }
+    let ip = args[1].clone();
+    let port = if args.len() > 2 {
+        args[2].parse().unwrap_or(4370)
     } else {
-        ("192.168.12.14".to_string(), 4370)
+        4370
     };
 
     println!("Connecting to ZK device at {}:{}...", ip, port);
