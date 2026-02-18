@@ -1,6 +1,6 @@
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
-use rustzk::ZK;
+use rustzk::{ZK, ZKProtocol};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
@@ -79,7 +79,7 @@ fn test_auth_handshake_mock() {
     zk.set_password(0); // Using default pass 0
 
     // connect() should handle CMD_ACK_UNAUTH and send CMD_AUTH automatically
-    let res = zk.connect(true);
+    let res = zk.connect(ZKProtocol::TCP);
     assert!(res.is_ok(), "Connection with auth should succeed");
     assert!(zk.is_connected, "ZK should be marked as connected");
 

@@ -439,3 +439,118 @@ fn test_connect_fallback_udp() {
 
     server_handle.join().unwrap();
 }
+
+#[test]
+fn test_get_users_gbk_decoding() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    let server_handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let session_id = 9999;
+        let mut last_prepared_cmd = 0;
+
+        // Helper to send packet - taking stream as arg to avoid capture issues
+        let mut send_packet = |s: &mut TcpStream, packet: ZKPacket| {
+            let wrapped = TCPWrapper::wrap(&packet.to_bytes());
+            s.write_all(&wrapped).unwrap();
+            s.flush().unwrap();
+        };
+
+        loop {
+            // Read packet inline
+            let mut header = [0u8; 8];
+            if stream.read_exact(&mut header).is_err() {
+                break;
+            }
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            stream.read_exact(&mut body).unwrap();
+            let packet = ZKPacket::from_bytes(&body).unwrap();
+
+            match packet.command {
+                CMD_CONNECT => {
+                    send_packet(&mut stream, ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]));
+                }
+                CMD_GET_FREE_SIZES => {
+                   let mut bytes = Vec::new();
+                    for i in 0..20 {
+                        let val = match i {
+                            4 => 1,      // users
+                            8 => 1,      // records
+                            15 => 1000,  // users_cap
+                            16 => 10000, // rec_cap
+                            _ => 0,
+                        };
+                        bytes.write_i32::<LittleEndian>(val).unwrap();
+                    }
+                    send_packet(&mut stream, ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, bytes));
+                }
+                _CMD_PREPARE_BUFFER => {
+                    if packet.payload.len() != 11 {
+                        panic!("_CMD_PREPARE_BUFFER payload len is {}, expected 11", packet.payload.len());
+                    }
+
+                    let cmd_in_buf = LittleEndian::read_u16(&packet.payload[1..3]);
+                    let fct_in_buf = LittleEndian::read_u32(&packet.payload[3..7]);
+                    assert_eq!(fct_in_buf, FCT_USER as u32, "FCT should be FCT_USER (5)");
+
+                    last_prepared_cmd = cmd_in_buf;
+                    
+                    let size: u32 = 4 + 28; 
+                    let mut res_payload = vec![0u8; 5];
+                    res_payload[0] = 1;
+                    LittleEndian::write_u32(&mut res_payload[1..5], size);
+                    send_packet(&mut stream, ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload));
+                }
+                _CMD_READ_BUFFER => {
+                    if last_prepared_cmd == CMD_USERTEMP_RRQ {
+                        let mut data = Vec::new();
+                        data.write_u32::<LittleEndian>(28).unwrap();
+                        data.write_u16::<LittleEndian>(101).unwrap();
+                        data.push(USER_DEFAULT);
+                        data.extend_from_slice(b"1234\0");
+                        
+                        // "你好" (GBK: C4 E3 BA C3)
+                        let mut name_bytes = [0u8; 8];
+                        name_bytes[0] = 0xC4;
+                        name_bytes[1] = 0xE3;
+                        name_bytes[2] = 0xBA;
+                        name_bytes[3] = 0xC3;
+                        data.extend_from_slice(&name_bytes); 
+                        
+                        data.write_u32::<LittleEndian>(0).unwrap();
+                        data.push(0);
+                        data.push(1);
+                        data.write_u16::<LittleEndian>(0).unwrap();
+                        data.write_u32::<LittleEndian>(888).unwrap();
+
+                        send_packet(&mut stream, ZKPacket::new(CMD_DATA, session_id, packet.reply_id, data));
+                    }
+                }
+                CMD_FREE_DATA => {
+                    send_packet(&mut stream, ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]));
+                }
+                CMD_EXIT => {
+                    send_packet(&mut stream, ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]));
+                    break;
+                }
+                _ => {
+                    send_packet(&mut stream, ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]));
+                }
+            }
+        }
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+    let users = zk.get_users().unwrap();
+    
+    assert_eq!(users.len(), 1);
+    assert_eq!(users[0].name, "你好");
+    assert_eq!(users[0].user_id, "888");
+
+    zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}
