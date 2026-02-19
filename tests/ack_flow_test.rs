@@ -31,17 +31,21 @@ fn test_read_chunk_waits_for_data_after_ack() {
             match packet.command {
                 CMD_CONNECT => {
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 CMD_GET_FREE_SIZES => {
                     let mut bytes = Vec::new();
                     for i in 0..20 {
                         // idx 4=users, 8=records. Set 1 user, 1 record.
-                        let val = if i == 4 || i == 8 { 1 } else { 0 }; 
+                        let val = if i == 4 || i == 8 { 1 } else { 0 };
                         bytes.write_i32::<LittleEndian>(val).unwrap();
                     }
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, bytes);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 _CMD_PREPARE_BUFFER => {
                     // Always say size is 4 (size header) + 28 (User struct) = 32
@@ -49,18 +53,23 @@ fn test_read_chunk_waits_for_data_after_ack() {
                     let mut res_payload = vec![0u8; 5];
                     res_payload[0] = 1;
                     LittleEndian::write_u32(&mut res_payload[1..5], size as u32);
-                    let res = ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    let res =
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 _CMD_READ_BUFFER => {
                     // HERE IS THE TEST:
                     // 1. Send ACK immediately.
                     // 2. Send DATA immediately after.
                     // The client MUST NOT send another request.
-                    
+
                     // 1. Send ACK
                     let ack = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&ack.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&ack.to_bytes()))
+                        .unwrap();
                     stream.flush().unwrap();
 
                     // Sleep tiny bit to ensure client processes ACK and enters "wait for data" state
@@ -75,26 +84,34 @@ fn test_read_chunk_waits_for_data_after_ack() {
                     data.extend_from_slice(b"pwd\0\0"); // Pass
                     data.extend_from_slice(b"Test\0\0\0\0"); // Name
                     data.write_u32::<LittleEndian>(0).unwrap(); // Card
-                    data.push(0); 
-                    data.push(1); 
-                    data.write_u16::<LittleEndian>(0).unwrap(); 
+                    data.push(0);
+                    data.push(1);
+                    data.write_u16::<LittleEndian>(0).unwrap();
                     data.write_u32::<LittleEndian>(101).unwrap(); // UserID
 
                     let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, data);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 CMD_FREE_DATA => {
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 CMD_EXIT => {
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                     break;
                 }
                 _ => {
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
             }
         }
@@ -105,7 +122,7 @@ fn test_read_chunk_waits_for_data_after_ack() {
 
     // This should trigger the READ_BUFFER flow
     let users = zk.get_users().expect("get_users failed");
-    
+
     assert_eq!(users.len(), 1);
     assert_eq!(users[0].name, "Test");
 

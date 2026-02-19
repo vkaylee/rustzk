@@ -199,37 +199,41 @@ impl ZK {
     }
 
     fn read_packet(&mut self) -> ZKResult<ZKPacket> {
-        let transport = self.transport.as_mut().ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+        let transport = self
+            .transport
+            .as_mut()
+            .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
         match transport {
-             ZKTransport::Tcp(stream) => {
-                 let mut header = [0u8; 8];
-                 stream.read_exact(&mut header)?;
-                 let (length, _) = TCPWrapper::decode_header(&header).map_err(|e| ZKError::InvalidData(e.to_string()))?;
-                 let mut body = vec![0u8; length];
-                 stream.read_exact(&mut body)?;
-                 ZKPacket::from_bytes(&body).map_err(|e| ZKError::InvalidData(e.to_string()))
-             }
-             ZKTransport::Udp(socket) => {
-                 let mut buf = vec![0u8; 2048];
-                 let len = socket.recv(&mut buf)?;
-                 ZKPacket::from_bytes(&buf[..len]).map_err(|e| ZKError::InvalidData(e.to_string()))
-             }
+            ZKTransport::Tcp(stream) => {
+                let mut header = [0u8; 8];
+                stream.read_exact(&mut header)?;
+                let (length, _) = TCPWrapper::decode_header(&header)
+                    .map_err(|e| ZKError::InvalidData(e.to_string()))?;
+                let mut body = vec![0u8; length];
+                stream.read_exact(&mut body)?;
+                ZKPacket::from_bytes(&body).map_err(|e| ZKError::InvalidData(e.to_string()))
+            }
+            ZKTransport::Udp(socket) => {
+                let mut buf = vec![0u8; 2048];
+                let len = socket.recv(&mut buf)?;
+                ZKPacket::from_bytes(&buf[..len]).map_err(|e| ZKError::InvalidData(e.to_string()))
+            }
         }
     }
 
     fn read_response_safe(&mut self) -> ZKResult<ZKPacket> {
         loop {
-             let res_packet = self.read_packet()?;
-             if res_packet.reply_id != self.reply_id {
-                 // Common to receive duplicate ACKs/packets from previous command.
-                 // Only log if verbose or if diff is large? For now just ignore or debug.
-                 // eprintln!("[DEBUG] Reply ID mismatch: expected {}, got {}. Discarding.", self.reply_id, res_packet.reply_id);
-                 continue;
-             }
-             // self.reply_id is already set to what we expect. 
-             // We don't update it from packet (it should match).
-             // Unless we want to support syncing TO the packet? No, we lead the dance.
-             return Ok(res_packet);
+            let res_packet = self.read_packet()?;
+            if res_packet.reply_id != self.reply_id {
+                // Common to receive duplicate ACKs/packets from previous command.
+                // Only log if verbose or if diff is large? For now just ignore or debug.
+                // eprintln!("[DEBUG] Reply ID mismatch: expected {}, got {}. Discarding.", self.reply_id, res_packet.reply_id);
+                continue;
+            }
+            // self.reply_id is already set to what we expect.
+            // We don't update it from packet (it should match).
+            // Unless we want to support syncing TO the packet? No, we lead the dance.
+            return Ok(res_packet);
         }
     }
 
@@ -414,12 +418,12 @@ impl ZK {
 
         let res = self.send_command(_CMD_READ_BUFFER, payload)?;
         if res.command == CMD_ACK_OK {
-             // If we get ACK for read chunk, it means data is coming next.
-             // Wait for the actual data packet.
-             let data_packet = self.read_response_safe()?;
-             self.receive_chunk(data_packet)
+            // If we get ACK for read chunk, it means data is coming next.
+            // Wait for the actual data packet.
+            let data_packet = self.read_response_safe()?;
+            self.receive_chunk(data_packet)
         } else {
-             self.receive_chunk(res)
+            self.receive_chunk(res)
         }
     }
 
