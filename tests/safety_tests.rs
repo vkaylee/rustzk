@@ -25,7 +25,9 @@ fn test_max_discarded_packets_limit() {
         let packet = ZKPacket::from_bytes(&body).unwrap();
 
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
 
         // 2. Handle CMD_GET_TIME
         stream.read_exact(&mut header).unwrap();
@@ -37,7 +39,9 @@ fn test_max_discarded_packets_limit() {
         // MOCK MALICIOUS DEVICE: Send MAX_DISCARDED_PACKETS + 1 stale packets
         for _ in 0..=MAX_DISCARDED_PACKETS {
             let stale_res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id + 1, vec![]);
-            stream.write_all(&TCPWrapper::wrap(&stale_res.to_bytes())).unwrap();
+            stream
+                .write_all(&TCPWrapper::wrap(&stale_res.to_bytes()))
+                .unwrap();
         }
         stream.flush().unwrap();
     });

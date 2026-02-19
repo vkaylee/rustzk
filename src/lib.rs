@@ -230,15 +230,14 @@ impl ZK {
         let mut discarded = 0;
         loop {
             let res_packet = self.read_packet()?;
-                        if res_packet.reply_id != self.reply_id {
-                            discarded += 1;
-                            log::warn!(
-                                "Reply ID mismatch: expected {}, got {}. Discarding packet.",
-                                self.reply_id,
-                                res_packet.reply_id
-                            );
-                            if discarded > MAX_DISCARDED_PACKETS {
-            
+            if res_packet.reply_id != self.reply_id {
+                discarded += 1;
+                log::warn!(
+                    "Reply ID mismatch: expected {}, got {}. Discarding packet.",
+                    self.reply_id,
+                    res_packet.reply_id
+                );
+                if discarded > MAX_DISCARDED_PACKETS {
                     return Err(ZKError::Response("Too many discarded packets".into()));
                 }
                 continue;
