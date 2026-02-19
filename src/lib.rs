@@ -586,7 +586,9 @@ impl ZK {
         let mut attendances = Vec::new();
         let mut offset = 0;
 
-        if record_size == 8 || (record_size > 0 && total_size.wrapping_rem(8) == 0 && record_size < 16) {
+        if record_size == 8
+            || (record_size > 0 && total_size.wrapping_rem(8) == 0 && record_size < 16)
+        {
             while offset + 8 <= data.len() {
                 let chunk = &data[offset..offset + 8];
                 let mut rdr = io::Cursor::new(chunk);
