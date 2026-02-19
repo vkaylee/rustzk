@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.9] - 2026-02-19
+### Fixed
+- Critical protocol desynchronization in `receive_chunk` by implementing `reply_id` validation.
+- Potential panic in `connect_tcp` by using robust DNS resolution (`ToSocketAddrs`).
+- Infinite loop vulnerability by enforcing a `MAX_DISCARDED_PACKETS` limit on stale packets.
+
+### Refactor
+- Centralized packet reading logic into a single internal helper to eliminate duplication and ensure consistent safety checks.
+- Replaced `eprintln!` with standard `log` crate for better observability.
+
 ## [0.2.7] - 2026-02-19
 ### Fixed
 - Request-Response Misalignment in TCP/UDP by verifying `reply_id` in `send_command`.

@@ -7,7 +7,7 @@ use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, FixedOffset, TimeZone};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, UdpSocket};
+use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
 
 use thiserror::Error;
@@ -133,7 +133,7 @@ impl ZK {
                 match self.connect_tcp() {
                     Ok(_) => Ok(()),
                     Err(e) => {
-                        println!("TCP connect failed: {}. Falling back to UDP...", e);
+                        log::info!("TCP connect failed: {}. Falling back to UDP...", e);
                         self.connect_udp()
                     }
                 }
@@ -142,10 +142,15 @@ impl ZK {
     }
 
     fn connect_tcp(&mut self) -> ZKResult<()> {
-        let stream = TcpStream::connect_timeout(
-            &self.addr.parse().unwrap(),
-            Duration::from_secs(5), // Short timeout for connection attempt
-        )?;
+        let addrs = self.addr.to_socket_addrs().map_err(|e| {
+            ZKError::Connection(format!("Failed to resolve address {}: {}", self.addr, e))
+        })?;
+        let addr = addrs
+            .into_iter()
+            .next()
+            .ok_or_else(|| ZKError::Connection(format!("No address found for {}", self.addr)))?;
+
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
         stream.set_read_timeout(Some(self.timeout))?;
         stream.set_write_timeout(Some(self.timeout))?;
 
@@ -222,12 +227,20 @@ impl ZK {
     }
 
     fn read_response_safe(&mut self) -> ZKResult<ZKPacket> {
+        let mut discarded = 0;
         loop {
             let res_packet = self.read_packet()?;
-            if res_packet.reply_id != self.reply_id {
-                // Common to receive duplicate ACKs/packets from previous command.
-                // Only log if verbose or if diff is large? For now just ignore or debug.
-                // eprintln!("[DEBUG] Reply ID mismatch: expected {}, got {}. Discarding.", self.reply_id, res_packet.reply_id);
+                        if res_packet.reply_id != self.reply_id {
+                            discarded += 1;
+                            log::warn!(
+                                "Reply ID mismatch: expected {}, got {}. Discarding packet.",
+                                self.reply_id,
+                                res_packet.reply_id
+                            );
+                            if discarded > MAX_DISCARDED_PACKETS {
+            
+                    return Err(ZKError::Response("Too many discarded packets".into()));
+                }
                 continue;
             }
             // self.reply_id is already set to what we expect.
@@ -352,39 +365,7 @@ impl ZK {
             let mut remaining = size;
 
             while remaining > 0 {
-                let transport = self
-                    .transport
-                    .as_mut()
-                    .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
-                let chunk_res = match transport {
-                    ZKTransport::Tcp(stream) => {
-                        let mut buf = vec![0u8; 65544]; // TCP_MAX_CHUNK + 8
-                        let mut n = stream.read(&mut buf)?;
-                        if n == 0 {
-                            return Err(ZKError::Network(io::Error::new(
-                                io::ErrorKind::UnexpectedEof,
-                                "Connection closed during chunk",
-                            )));
-                        }
-                        if n < 8 {
-                            stream.read_exact(&mut buf[n..8])?;
-                            n = 8;
-                        }
-                        let (length, _) = TCPWrapper::decode_header(&buf[..8])
-                            .map_err(|e| ZKError::InvalidData(e.to_string()))?;
-                        let total_needed = 8 + length;
-                        if n < total_needed {
-                            buf.resize(total_needed, 0);
-                            stream.read_exact(&mut buf[n..total_needed])?;
-                        }
-                        ZKPacket::from_bytes(&buf[8..8 + length])?
-                    }
-                    ZKTransport::Udp(socket) => {
-                        let mut buf = vec![0u8; 2048];
-                        let len = socket.recv(&mut buf)?;
-                        ZKPacket::from_bytes(&buf[..len])?
-                    }
-                };
+                let chunk_res = self.read_response_safe()?;
 
                 if chunk_res.command == CMD_DATA {
                     data.extend_from_slice(&chunk_res.payload);

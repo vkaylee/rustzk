@@ -113,5 +113,6 @@ pub const MACHINE_PREPARE_DATA_1: u16 = 20560; // 0x5050
 pub const MACHINE_PREPARE_DATA_2: u16 = 32130; // 0x7282
 
 pub const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024; // 10MB limit for safety
+pub const MAX_DISCARDED_PACKETS: usize = 100;
 pub const TCP_MAX_CHUNK: usize = 0xFFC0;
 pub const UDP_MAX_CHUNK: usize = 16 * 1024;
