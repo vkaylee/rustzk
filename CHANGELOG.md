@@ -2,7 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.2.7] - 2026-02-19
+### Fixed
+- Request-Response Misalignment in TCP/UDP by verifying `reply_id` in `send_command`.
+- Improved TCP robustness using `read_exact` for header and payload separation.
+
+## [0.2.6] - 2026-02-19
 ### Added
 - Stateful Mock ZK Server for integration testing.
 - Comprehensive integration tests for `get_users` and `get_attendance`.

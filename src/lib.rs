@@ -217,41 +217,43 @@ impl ZK {
                 let wrapped = TCPWrapper::wrap(&bytes);
                 stream.write_all(&wrapped)?;
 
-                // Read response like pyzk: single read call, then parse.
-                // This avoids hanging when device sends unexpected data
-                // that would desync two sequential read_exact() calls.
-                let mut buf = vec![0u8; 1040];
-                let mut n = stream.read(&mut buf)?;
-                if n == 0 {
-                    return Err(ZKError::Network(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "Connection closed",
-                    )));
-                }
-                // Ensure we have at least the 8-byte TCP header
-                if n < 8 {
-                    stream.read_exact(&mut buf[n..8])?;
-                    n = 8;
-                }
-                let (length, _) = TCPWrapper::decode_header(&buf[..8])
-                    .map_err(|e| ZKError::InvalidData(e.to_string()))?;
-                let total_needed = 8 + length;
-                if n < total_needed {
-                    buf.resize(total_needed, 0);
-                    stream.read_exact(&mut buf[n..total_needed])?;
-                }
+                loop {
+                    let mut header = [0u8; 8];
+                    stream.read_exact(&mut header)?;
+                    let (length, _) = TCPWrapper::decode_header(&header)
+                        .map_err(|e| ZKError::InvalidData(e.to_string()))?;
 
-                let res_packet = ZKPacket::from_bytes(&buf[8..8 + length])?;
-                self.reply_id = res_packet.reply_id;
-                Ok(res_packet)
+                    let mut body = vec![0u8; length];
+                    stream.read_exact(&mut body)?;
+
+                    let res_packet = ZKPacket::from_bytes(&body)?;
+                    if res_packet.reply_id != self.reply_id {
+                        eprintln!(
+                            "[WARN] Reply ID mismatch: expected {}, got {}. Discarding packet.",
+                            self.reply_id, res_packet.reply_id
+                        );
+                        continue;
+                    }
+                    self.reply_id = res_packet.reply_id;
+                    return Ok(res_packet);
+                }
             }
             ZKTransport::Udp(socket) => {
                 socket.send(&bytes)?;
-                let mut buf = vec![0u8; 2048];
-                let len = socket.recv(&mut buf)?;
-                let res_packet = ZKPacket::from_bytes(&buf[..len])?;
-                self.reply_id = res_packet.reply_id;
-                Ok(res_packet)
+                loop {
+                    let mut buf = vec![0u8; 2048];
+                    let len = socket.recv(&mut buf)?;
+                    let res_packet = ZKPacket::from_bytes(&buf[..len])?;
+                    if res_packet.reply_id != self.reply_id {
+                        eprintln!(
+                            "[WARN] Reply ID mismatch: expected {}, got {}. Discarding packet.",
+                            self.reply_id, res_packet.reply_id
+                        );
+                        continue;
+                    }
+                    self.reply_id = res_packet.reply_id;
+                    return Ok(res_packet);
+                }
             }
         }
     }
