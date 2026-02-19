@@ -61,6 +61,7 @@ pub struct ZK {
     pub faces_cap: i32,
     pub encoding: String,
     pub password: u32,
+    pub timezone_offset: i32, // Offset in minutes
 }
 
 impl ZK {
@@ -85,6 +86,7 @@ impl ZK {
             faces_cap: 0,
             encoding: "UTF-8".to_string(),
             password: 0,
+            timezone_offset: 0,
         }
     }
 
@@ -276,6 +278,12 @@ impl ZK {
                 self.faces = rdr.read_i32::<byteorder::LittleEndian>()? as u32;
                 let _ = rdr.read_i32::<byteorder::LittleEndian>()?;
                 self.faces_cap = rdr.read_i32::<byteorder::LittleEndian>()?;
+            }
+            // Auto-sync timezone
+            if let Ok(tz_str) = self.get_option_value("TZAdj") {
+                if let Ok(tz_val) = tz_str.parse::<i32>() {
+                    self.timezone_offset = tz_val * 60; // Convert hours to minutes
+                }
             }
             Ok(())
         } else {
@@ -611,6 +619,7 @@ impl ZK {
                     timestamp,
                     status,
                     punch,
+                    timezone_offset: self.timezone_offset,
                 });
                 offset += record_size;
             }
@@ -641,6 +650,7 @@ impl ZK {
                     timestamp,
                     status,
                     punch,
+                    timezone_offset: self.timezone_offset,
                 });
                 offset += 16;
             }
@@ -676,6 +686,7 @@ impl ZK {
                     timestamp,
                     status,
                     punch,
+                    timezone_offset: self.timezone_offset,
                 });
                 offset += record_size;
             }
@@ -695,7 +706,7 @@ impl ZK {
         }
     }
 
-    fn get_option_value(&mut self, key: &str) -> ZKResult<String> {
+    pub fn get_option_value(&mut self, key: &str) -> ZKResult<String> {
         let mut command_string = key.as_bytes().to_vec();
         command_string.push(0);
         let res = self.send_command(CMD_OPTIONS_RRQ, command_string)?;

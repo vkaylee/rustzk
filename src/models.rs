@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 
 #[derive(Debug, Clone)]
 pub struct Attendance {
@@ -7,6 +7,33 @@ pub struct Attendance {
     pub timestamp: NaiveDateTime,
     pub status: u8,
     pub punch: u8,
+    pub timezone_offset: i32, // Offset in minutes (e.g., 420 for UTC+7)
+}
+
+impl Attendance {
+    /// Returns the timestamp as a DateTime with the device's fixed offset.
+    pub fn timestamp_fixed(&self) -> DateTime<FixedOffset> {
+        let offset = FixedOffset::east_opt(self.timezone_offset * 60)
+            .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+        offset
+            .from_local_datetime(&self.timestamp)
+            .single()
+            .unwrap_or_else(|| {
+                // Fallback for ambiguous or non-existent times during DST transitions
+                DateTime::<FixedOffset>::from_naive_utc_and_offset(self.timestamp, offset)
+            })
+    }
+
+    /// Returns the timestamp in UTC.
+    pub fn timestamp_utc(&self) -> DateTime<Utc> {
+        let fixed = self.timestamp_fixed();
+        fixed.with_timezone(&Utc)
+    }
+
+    /// Returns the timestamp formatted as an ISO8601 string with offset.
+    pub fn iso_format(&self) -> String {
+        self.timestamp_fixed().to_rfc3339()
+    }
 }
 
 #[derive(Debug, Clone)]

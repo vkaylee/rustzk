@@ -25,6 +25,25 @@ fn main() {
         eprintln!("Failed to read sizes: {}", e);
     } else {
         println!("Records reported by device: {}", zk.records);
+        println!(
+            "Device Timezone Offset: {} minutes (UTC+{})",
+            zk.timezone_offset,
+            zk.timezone_offset / 60
+        );
+    }
+
+    println!("\n--- Checking System Options ---");
+    let options = [
+        "TimeZone",
+        "TZAdj",
+        "DTFmt",
+        "StandardTime",
+        "DaylightSavingsTime",
+    ];
+    for opt in options {
+        if let Ok(val) = zk.get_option_value(opt) {
+            println!("{}: {}", opt, val);
+        }
     }
 
     println!("\n--- Attempting to Disable Device ---");
@@ -48,14 +67,22 @@ fn main() {
             println!("Custom get_attendance(0) returned {} logs", logs.len());
             if let Some(first) = logs.first() {
                 println!(
-                    "FIRST LOG: UserID={}, Time={}, Status={}, Punch={}",
-                    first.user_id, first.timestamp, first.status, first.punch
+                    "FIRST LOG: UserID={}, Time={} (ISO={}), Status={}, Punch={}",
+                    first.user_id,
+                    first.timestamp,
+                    first.iso_format(),
+                    first.status,
+                    first.punch
                 );
             }
             if let Some(last) = logs.last() {
                 println!(
-                    "LAST LOG:  UserID={}, Time={}, Status={}, Punch={}",
-                    last.user_id, last.timestamp, last.status, last.punch
+                    "LAST LOG:  UserID={}, Time={} (ISO={}), Status={}, Punch={}",
+                    last.user_id,
+                    last.timestamp,
+                    last.iso_format(),
+                    last.status,
+                    last.punch
                 );
             }
         }
@@ -111,6 +138,7 @@ fn custom_get_attendance(
                 timestamp,
                 status,
                 punch,
+                timezone_offset: zk.timezone_offset,
             });
             offset += 8;
         }
@@ -129,6 +157,7 @@ fn custom_get_attendance(
                 timestamp,
                 status,
                 punch,
+                timezone_offset: zk.timezone_offset,
             });
             offset += 16;
         }
@@ -155,6 +184,7 @@ fn custom_get_attendance(
                 timestamp,
                 status,
                 punch,
+                timezone_offset: zk.timezone_offset,
             });
             offset += record_size;
         }
