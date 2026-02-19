@@ -429,13 +429,17 @@ impl ZK {
             return Ok(res.payload);
         }
 
+        // Parse size: prioritize offset 1 (standard) if length >= 5
         let size = if res.payload.len() >= 5 {
             byteorder::LittleEndian::read_u32(&res.payload[1..5]) as usize
-        } else if res.command == CMD_ACK_OK && res.payload.len() >= 4 {
-            // Some devices return size in ACK_OK payload directly
+        } else if res.payload.len() >= 4 {
+            // Fallback for short ACK_OK payloads
             byteorder::LittleEndian::read_u32(&res.payload[0..4]) as usize
         } else {
-            0
+            return Err(ZKError::Response(format!(
+                "Invalid response size length: {}",
+                res.payload.len()
+            )));
         };
 
         if size > MAX_RESPONSE_SIZE {
