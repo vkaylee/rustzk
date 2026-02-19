@@ -352,31 +352,34 @@ impl ZK {
                     .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
                 let chunk_res = match transport {
                     ZKTransport::Tcp(stream) => {
-                        let mut buf = vec![0u8; 65544]; // TCP_MAX_CHUNK + 8
-                        let mut n = stream.read(&mut buf)?;
-                        if n == 0 {
-                            return Err(ZKError::Network(io::Error::new(
-                                io::ErrorKind::UnexpectedEof,
-                                "Connection closed during chunk",
-                            )));
-                        }
-                        if n < 8 {
-                            stream.read_exact(&mut buf[n..8])?;
-                            n = 8;
-                        }
-                        let (length, _) = TCPWrapper::decode_header(&buf[..8])
+                        let mut header = [0u8; 8];
+                        stream.read_exact(&mut header)?;
+                        let (length, _) = TCPWrapper::decode_header(&header)
                             .map_err(|e| ZKError::InvalidData(e.to_string()))?;
-                        let total_needed = 8 + length;
-                        if n < total_needed {
-                            buf.resize(total_needed, 0);
-                            stream.read_exact(&mut buf[n..total_needed])?;
+                        let mut body = vec![0u8; length];
+                        stream.read_exact(&mut body)?;
+                        let res_packet = ZKPacket::from_bytes(&body)?;
+                        if res_packet.reply_id != self.reply_id {
+                            eprintln!(
+                                "[WARN] Reply ID mismatch in chunk (TCP): expected {}, got {}. Discarding packet.",
+                                self.reply_id, res_packet.reply_id
+                            );
+                            continue;
                         }
-                        ZKPacket::from_bytes(&buf[8..8 + length])?
+                        res_packet
                     }
                     ZKTransport::Udp(socket) => {
                         let mut buf = vec![0u8; 2048];
                         let len = socket.recv(&mut buf)?;
-                        ZKPacket::from_bytes(&buf[..len])?
+                        let res_packet = ZKPacket::from_bytes(&buf[..len])?;
+                        if res_packet.reply_id != self.reply_id {
+                            eprintln!(
+                                "[WARN] Reply ID mismatch in chunk (UDP): expected {}, got {}. Discarding packet.",
+                                self.reply_id, res_packet.reply_id
+                            );
+                            continue;
+                        }
+                        res_packet
                     }
                 };
 
