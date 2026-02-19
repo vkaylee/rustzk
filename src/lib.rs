@@ -2,7 +2,7 @@ pub mod constants;
 pub mod models;
 pub mod protocol;
 
-use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use chrono::{DateTime, FixedOffset, TimeZone};
 use std::collections::HashMap;
@@ -214,14 +214,31 @@ impl ZK {
                 stream.read_exact(&mut header)?;
                 let (length, _) = TCPWrapper::decode_header(&header)
                     .map_err(|e| ZKError::InvalidData(e.to_string()))?;
+
                 let mut body = vec![0u8; length];
                 stream.read_exact(&mut body)?;
-                ZKPacket::from_bytes(&body).map_err(|e| ZKError::InvalidData(e.to_string()))
+
+                let mut rdr = io::Cursor::new(&body);
+                let command = rdr.read_u16::<LittleEndian>()?;
+                let checksum = rdr.read_u16::<LittleEndian>()?;
+                let session_id = rdr.read_u16::<LittleEndian>()?;
+                let reply_id = rdr.read_u16::<LittleEndian>()?;
+                let mut payload = body;
+                payload.drain(0..8);
+
+                Ok(ZKPacket {
+                    command,
+                    checksum,
+                    session_id,
+                    reply_id,
+                    payload,
+                })
             }
             ZKTransport::Udp(socket) => {
                 let mut buf = vec![0u8; 2048];
                 let len = socket.recv(&mut buf)?;
-                ZKPacket::from_bytes(&buf[..len]).map_err(|e| ZKError::InvalidData(e.to_string()))
+                buf.truncate(len);
+                ZKPacket::from_bytes_owned(buf)
             }
         }
     }
@@ -256,7 +273,6 @@ impl ZK {
         }
 
         let packet = ZKPacket::new(command, self.session_id, self.reply_id, payload);
-        let bytes = packet.to_bytes();
 
         let transport = self
             .transport
@@ -265,11 +281,16 @@ impl ZK {
 
         match transport {
             ZKTransport::Tcp(stream) => {
-                let wrapped = TCPWrapper::wrap(&bytes);
-                stream.write_all(&wrapped)?;
+                let mut buf = Vec::with_capacity(packet.payload.len() + 16);
+                let mut packet_buf = Vec::with_capacity(packet.payload.len() + 8);
+                packet.to_bytes_into(&mut packet_buf);
+                TCPWrapper::wrap_into(&packet_buf, &mut buf);
+                stream.write_all(&buf)?;
             }
             ZKTransport::Udp(socket) => {
-                socket.send(&bytes)?;
+                let mut buf = Vec::with_capacity(packet.payload.len() + 8);
+                packet.to_bytes_into(&mut buf);
+                socket.send(&buf)?;
             }
         }
 

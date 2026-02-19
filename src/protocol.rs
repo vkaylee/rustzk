@@ -1,4 +1,5 @@
 use crate::constants::*;
+use crate::{ZKError, ZKResult};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Cursor};
 
@@ -63,23 +64,51 @@ impl ZKPacket {
     }
 
     fn calculate_checksum(&self) -> u16 {
-        let mut buf = Vec::new();
-        buf.write_u16::<LittleEndian>(self.command).unwrap();
-        buf.write_u16::<LittleEndian>(0).unwrap();
-        buf.write_u16::<LittleEndian>(self.session_id).unwrap();
-        buf.write_u16::<LittleEndian>(self.reply_id).unwrap();
-        buf.extend_from_slice(&self.payload);
-        calculate_checksum(&buf)
+        let mut sum: u32 = 0;
+
+        // Sum the header fields (excluding the checksum field itself)
+        sum += self.command as u32;
+        sum += self.session_id as u32;
+        sum += self.reply_id as u32;
+
+        // Sum the payload bytes as u16 pairs
+        let mut i = 0;
+        let payload_len = self.payload.len();
+        while i + 1 < payload_len {
+            let val = u16::from_le_bytes([self.payload[i], self.payload[i + 1]]);
+            sum += val as u32;
+            if sum > USHRT_MAX as u32 {
+                sum -= USHRT_MAX as u32;
+            }
+            i += 2;
+        }
+
+        if i < payload_len {
+            sum += self.payload[i] as u32;
+            if sum > USHRT_MAX as u32 {
+                sum -= USHRT_MAX as u32;
+            }
+        }
+
+        while sum > USHRT_MAX as u32 {
+            sum -= USHRT_MAX as u32;
+        }
+
+        !sum as u16
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(8 + self.payload.len());
+        self.to_bytes_into(&mut buf);
+        buf
+    }
+
+    pub fn to_bytes_into(&self, buf: &mut Vec<u8>) {
         buf.write_u16::<LittleEndian>(self.command).unwrap();
         buf.write_u16::<LittleEndian>(self.checksum).unwrap();
         buf.write_u16::<LittleEndian>(self.session_id).unwrap();
         buf.write_u16::<LittleEndian>(self.reply_id).unwrap();
         buf.extend_from_slice(&self.payload);
-        buf
     }
 
     pub fn from_bytes(data: &[u8]) -> io::Result<Self> {
@@ -94,8 +123,7 @@ impl ZKPacket {
         let checksum = rdr.read_u16::<LittleEndian>()?;
         let session_id = rdr.read_u16::<LittleEndian>()?;
         let reply_id = rdr.read_u16::<LittleEndian>()?;
-        let mut payload = Vec::new();
-        io::Read::read_to_end(&mut rdr, &mut payload)?;
+        let payload = data[8..].to_vec();
         Ok(ZKPacket {
             command,
             checksum,
@@ -104,20 +132,43 @@ impl ZKPacket {
             payload,
         })
     }
+
+    pub fn from_bytes_owned(mut data: Vec<u8>) -> ZKResult<Self> {
+        if data.len() < 8 {
+            return Err(ZKError::InvalidData("Packet too short".into()));
+        }
+        let mut rdr = Cursor::new(&data);
+        let command = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
+        let checksum = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
+        let session_id = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
+        let reply_id = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
+        data.drain(0..8);
+        Ok(ZKPacket {
+            command,
+            checksum,
+            session_id,
+            reply_id,
+            payload: data,
+        })
+    }
 }
 
 pub struct TCPWrapper;
 
 impl TCPWrapper {
     pub fn wrap(packet: &[u8]) -> Vec<u8> {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(8 + packet.len());
+        Self::wrap_into(packet, &mut buf);
+        buf
+    }
+
+    pub fn wrap_into(packet: &[u8], buf: &mut Vec<u8>) {
         buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)
             .unwrap();
         buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)
             .unwrap();
         buf.write_u32::<LittleEndian>(packet.len() as u32).unwrap();
         buf.extend_from_slice(packet);
-        buf
     }
 
     pub fn unwrap(data: &[u8]) -> io::Result<(&[u8], usize)> {
