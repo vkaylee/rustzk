@@ -2,17 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.9] - 2026-02-19
+## [0.3.0] - 2026-02-19
+### Added
+- Standard `log` crate integration for better observability.
+- Support for Hostnames in `connect_tcp` via DNS resolution.
+- New regression tests for protocol misalignment and safety limits.
+
+### Changed
+- **Major Performance Optimization**: Refactored packet serialization and deserialization to use buffer-centric methods (`to_bytes_into`, `wrap_into`), significantly reducing memory allocations.
+- **Zero-Copy Improvements**: Optimized `read_packet` to read directly into payload buffers and implemented `from_bytes_owned`.
+- Consolidated transport reading logic into centralized internal helpers for better maintainability.
+
 ### Fixed
-- Critical protocol desynchronization in `receive_chunk` by implementing `reply_id` validation.
-- Potential panic in `connect_tcp` by using robust DNS resolution (`ToSocketAddrs`).
+- Critical protocol desynchronization in `receive_chunk` by implementing strict `reply_id` validation.
 - Infinite loop vulnerability by enforcing a `MAX_DISCARDED_PACKETS` limit on stale packets.
+- Potential panic during TCP connection initialization.
 
-### Refactor
-- Centralized packet reading logic into a single internal helper to eliminate duplication and ensure consistent safety checks.
-- Replaced `eprintln!` with standard `log` crate for better observability.
-
-## [0.2.7] - 2026-02-19
+## [0.2.9] - 2026-02-19
 ### Fixed
 - Request-Response Misalignment in TCP/UDP by verifying `reply_id` in `send_command`.
 - Improved TCP robustness using `read_exact` for header and payload separation.
