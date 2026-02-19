@@ -198,7 +198,7 @@ impl ZK {
         }
     }
 
-    pub fn send_command(&mut self, command: u16, payload: Vec<u8>) -> ZKResult<ZKPacket> {
+    pub(crate) fn send_command(&mut self, command: u16, payload: Vec<u8>) -> ZKResult<ZKPacket> {
         self.reply_id = self.reply_id.wrapping_add(1);
         if self.reply_id == USHRT_MAX {
             self.reply_id -= USHRT_MAX;
@@ -412,7 +412,12 @@ impl ZK {
         self.receive_chunk(res)
     }
 
-    pub fn read_with_buffer(&mut self, command: u16, fct: u8, ext: u32) -> ZKResult<Vec<u8>> {
+    pub(crate) fn read_with_buffer(
+        &mut self,
+        command: u16,
+        fct: u8,
+        ext: u32,
+    ) -> ZKResult<Vec<u8>> {
         let mut payload = Vec::new();
         payload.write_u8(1)?; // ZK6/8 flag?
         payload.write_u16::<byteorder::LittleEndian>(command)?;
@@ -582,14 +587,23 @@ impl ZK {
             return Ok(Vec::new());
         }
 
-        let users = self.get_users()?;
+        // Fetch raw attendance buffer FIRST, before any other buffer commands.
+        // Some firmware (e.g. ZAM180 Ver 6.60) loses buffer state after CMD_FREE_DATA
+        // sent at the end of get_users(), so attendance must be fetched first.
         let attendance_data = self.read_with_buffer(CMD_ATTLOG_RRQ, 0, 0)?;
         if attendance_data.len() < 4 {
             return Ok(Vec::new());
         }
 
+        // Resolve uid → user_id after attendance data is safely in memory.
+        let users = self.get_users().unwrap_or_default();
+
         let total_size = byteorder::LittleEndian::read_u32(&attendance_data[0..4]) as usize;
-        let record_size = total_size / self.records as usize;
+        let record_size = if self.records > 0 {
+            total_size / self.records as usize
+        } else {
+            0
+        };
         let data = &attendance_data[4..];
 
         let mut attendances = Vec::new();

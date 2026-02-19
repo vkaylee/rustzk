@@ -769,8 +769,8 @@ fn test_infinite_loop_protection() {
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
 
-    // This should fail after 100 retries
-    let result = zk.read_with_buffer(CMD_ATTLOG_RRQ, 0, 0);
+    // get_attendance() should fail after 100 empty _CMD_READ_BUFFER responses
+    let result = zk.get_attendance();
     assert!(
         result.is_err(),
         "Expected error from infinite loop protection"
@@ -983,6 +983,172 @@ fn test_timezone_sync_from_device() {
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].timezone_offset, 480);
     assert_eq!(logs[0].iso_format().ends_with("+08:00"), true);
+
+    zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}
+
+/// Regression test for ZAM180 Ver 6.60 firmware behavior:
+///
+/// On this firmware, the device resets its internal buffer state after every
+/// `CMD_FREE_DATA`. If `get_users()` was called first (ending with `CMD_FREE_DATA`),
+/// the subsequent `_CMD_PREPARE_BUFFER` for `CMD_ATTLOG_RRQ` returns `CMD_ACK_OK`
+/// with a **0-byte payload** — no size info — causing `read_with_buffer` to compute
+/// `size = 0` and return an empty `Vec` (no attendances).
+///
+/// The fix: `get_attendance()` must fetch the attendance buffer FIRST, then call
+/// `get_users()` afterwards to resolve `uid → user_id`.
+///
+/// This mock encodes the exact firmware quirk:
+///   - `_CMD_PREPARE_BUFFER(CMD_ATTLOG_RRQ)` → full `CMD_PREPARE_DATA` response (first call)
+///   - `_CMD_PREPARE_BUFFER(CMD_ATTLOG_RRQ)` → `CMD_ACK_OK` + empty payload  (after `CMD_FREE_DATA`)
+#[test]
+fn test_get_attendance_fetches_attlog_before_users() {
+    use std::sync::{Arc, Mutex};
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    // `free_data_received` tracks whether CMD_FREE_DATA has been seen —
+    // after which the mock simulates the ZAM180 "broken ATTLOG" state.
+    let free_data_received = Arc::new(Mutex::new(false));
+    let free_data_for_server = Arc::clone(&free_data_received);
+
+    let server_handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("Failed to accept");
+        let session_id: u16 = 4321;
+
+        macro_rules! send {
+            ($pkt:expr) => {
+                stream
+                    .write_all(&TCPWrapper::wrap(&$pkt.to_bytes()))
+                    .unwrap();
+            };
+        }
+
+        loop {
+            let mut hdr = [0u8; 8];
+            if stream.read_exact(&mut hdr).is_err() {
+                break;
+            }
+            let (len, _) = TCPWrapper::decode_header(&hdr).unwrap();
+            let mut body = vec![0u8; len];
+            stream.read_exact(&mut body).unwrap();
+            let pkt = ZKPacket::from_bytes(&body).unwrap();
+
+            match pkt.command {
+                CMD_CONNECT => {
+                    send!(ZKPacket::new(CMD_ACK_OK, session_id, pkt.reply_id, vec![]));
+                }
+
+                CMD_GET_FREE_SIZES => {
+                    // Report 1 user, 1 attendance record
+                    let mut bytes = Vec::new();
+                    for i in 0..20i32 {
+                        let val = match i {
+                            4 => 1,      // users
+                            8 => 1,      // records
+                            15 => 1000,  // users_cap
+                            16 => 10000, // rec_cap
+                            _ => 0,
+                        };
+                        bytes.write_i32::<LittleEndian>(val).unwrap();
+                    }
+                    send!(ZKPacket::new(CMD_ACK_OK, session_id, pkt.reply_id, bytes));
+                }
+
+                _CMD_PREPARE_BUFFER => {
+                    let cmd_in_buf = LittleEndian::read_u16(&pkt.payload[1..3]);
+                    let attlog_broken = *free_data_for_server.lock().unwrap();
+
+                    if cmd_in_buf == CMD_ATTLOG_RRQ && attlog_broken {
+                        // ZAM180 quirk: ATTLOG buffer unavailable after CMD_FREE_DATA.
+                        // Device returns CMD_ACK_OK with 0 bytes — no size information.
+                        send!(ZKPacket::new(CMD_ACK_OK, session_id, pkt.reply_id, vec![]));
+                    } else {
+                        let size: u32 = if cmd_in_buf == CMD_USERTEMP_RRQ {
+                            4 + 28 // one 28-byte user record
+                        } else {
+                            4 + 8 // one 8-byte attendance record
+                        };
+                        let mut res_payload = vec![0u8; 5];
+                        res_payload[0] = 1;
+                        LittleEndian::write_u32(&mut res_payload[1..5], size);
+                        send!(ZKPacket::new(
+                            CMD_PREPARE_DATA,
+                            session_id,
+                            pkt.reply_id,
+                            res_payload
+                        ));
+                    }
+                }
+
+                _CMD_READ_BUFFER => {
+                    let attlog_broken = *free_data_for_server.lock().unwrap();
+
+                    if attlog_broken {
+                        // get_users() is running after attendance — serve user data
+                        let mut data = Vec::new();
+                        data.write_u32::<LittleEndian>(28).unwrap(); // total_size prefix
+                        data.write_u16::<LittleEndian>(1).unwrap(); // uid = 1
+                        data.push(USER_DEFAULT); // privilege
+                        data.extend_from_slice(b"\0\0\0\0\0"); // password (5 bytes)
+                        data.extend_from_slice(b"Alice\0\0\0"); // name (8 bytes)
+                        data.write_u32::<LittleEndian>(0).unwrap(); // card
+                        data.push(0); // pad
+                        data.push(1); // group
+                        data.write_u16::<LittleEndian>(0).unwrap(); // tz
+                        data.write_u32::<LittleEndian>(501).unwrap(); // user_id = "501"
+                        send!(ZKPacket::new(CMD_DATA, session_id, pkt.reply_id, data));
+                    } else {
+                        // get_attendance()'s raw buffer read — serve attendance data
+                        // 8-byte record format: uid(u16) + status(u8) + time(u32) + punch(u8)
+                        let mut data = Vec::new();
+                        data.write_u32::<LittleEndian>(8).unwrap(); // total_size prefix
+                        data.write_u16::<LittleEndian>(1).unwrap(); // uid = 1
+                        data.push(1u8); // status = check-in
+                        data.write_u32::<LittleEndian>(839_845_230).unwrap(); // encoded time
+                        data.push(0u8); // punch
+                        send!(ZKPacket::new(CMD_DATA, session_id, pkt.reply_id, data));
+                    }
+                }
+
+                CMD_FREE_DATA => {
+                    // Mark state as broken: any subsequent ATTLOG prepare will fail
+                    *free_data_for_server.lock().unwrap() = true;
+                    send!(ZKPacket::new(CMD_ACK_OK, session_id, pkt.reply_id, vec![]));
+                }
+
+                CMD_EXIT => {
+                    send!(ZKPacket::new(CMD_ACK_OK, session_id, pkt.reply_id, vec![]));
+                    break;
+                }
+
+                _ => {
+                    send!(ZKPacket::new(CMD_ACK_OK, session_id, pkt.reply_id, vec![]));
+                }
+            }
+        }
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+
+    // get_attendance() must succeed because it now fetches the attendance buffer
+    // BEFORE calling get_users().  If the old order (users first) were used, the mock
+    // would return empty ACK_OK for the ATTLOG prepare and the result would be empty.
+    let logs = zk.get_attendance().unwrap();
+
+    assert_eq!(logs.len(), 1, "Expected exactly 1 attendance log");
+
+    // uid=1 is resolved to user_id="501" via the post-fetch get_users() call
+    assert_eq!(
+        logs[0].user_id, "501",
+        "uid=1 should resolve to user_id=\"501\" (resolved after attendance fetch)"
+    );
+    assert_eq!(logs[0].uid, 1);
+    assert_eq!(logs[0].status, 1, "status should be 1 (check-in)");
 
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
