@@ -313,6 +313,11 @@ impl ZK {
     fn receive_chunk(&mut self, res: ZKPacket) -> ZKResult<Vec<u8>> {
         if res.command == CMD_DATA {
             Ok(res.payload)
+        } else if res.command == CMD_ACK_OK {
+            // New firmware may send ACK_OK before actual data.
+            // Give the device a little time to prepare.
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            Ok(Vec::new())
         } else if res.command == CMD_PREPARE_DATA {
             if res.payload.len() < 4 {
                 return Err(ZKError::InvalidData("Invalid prepare data payload".into()));
@@ -410,13 +415,11 @@ impl ZK {
             return Ok(res.payload);
         }
 
-        if res.command != CMD_PREPARE_DATA {
-            // Some devices might return ACK_OK and wait for read_chunk
-            // But usually it's PREPARE_DATA
-        }
-
         let size = if res.payload.len() >= 5 {
             byteorder::LittleEndian::read_u32(&res.payload[1..5]) as usize
+        } else if res.command == CMD_ACK_OK && res.payload.len() >= 4 {
+            // Some devices return size in ACK_OK payload directly
+            byteorder::LittleEndian::read_u32(&res.payload[0..4]) as usize
         } else {
             0
         };
@@ -437,10 +440,24 @@ impl ZK {
         let mut data = Vec::with_capacity(size);
         let mut start = 0;
         let mut remaining = size;
+        let mut empty_responses_count = 0;
 
         while remaining > 0 {
             let chunk_size = std::cmp::min(remaining, max_chunk);
             let chunk = self.read_chunk(start as i32, chunk_size as i32)?;
+
+            if chunk.is_empty() {
+                empty_responses_count += 1;
+                if empty_responses_count > 100 {
+                    return Err(ZKError::Response(
+                        "Too many empty responses from device".into(),
+                    ));
+                }
+                // Small delay or just continue to wait for device to prepare data
+                continue;
+            }
+
+            empty_responses_count = 0; // Reset counter on success
             data.extend_from_slice(&chunk);
             start += chunk.len();
             if remaining >= chunk.len() {
@@ -569,7 +586,7 @@ impl ZK {
         let mut attendances = Vec::new();
         let mut offset = 0;
 
-        if record_size == 8 {
+        if record_size == 8 || (record_size > 0 && total_size.wrapping_rem(8) == 0 && record_size < 16) {
             while offset + 8 <= data.len() {
                 let chunk = &data[offset..offset + 8];
                 let mut rdr = io::Cursor::new(chunk);
@@ -593,9 +610,11 @@ impl ZK {
                     status,
                     punch,
                 });
-                offset += 8;
+                offset += record_size;
             }
-        } else if record_size == 16 {
+        } else if record_size == 16
+            || (record_size > 0 && record_size.wrapping_rem(16) == 0 && record_size < 40)
+        {
             while offset + 16 <= data.len() {
                 let chunk = &data[offset..offset + 16];
                 let mut rdr = io::Cursor::new(chunk);
