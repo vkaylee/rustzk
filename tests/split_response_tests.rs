@@ -40,7 +40,7 @@ fn test_read_sizes_split_response_tcp() {
         let packet = ZKPacket::from_bytes(&body).unwrap();
         assert_eq!(packet.command, CMD_GET_FREE_SIZES);
 
-        // SYIMULATE BUG/SPLIT: 
+        // SYIMULATE BUG/SPLIT:
         // First send an empty ACK_OK
         let ack_ok = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
         stream
@@ -49,7 +49,7 @@ fn test_read_sizes_split_response_tcp() {
         stream.flush().unwrap();
 
         // Then send the actual DATA packet (CMD_ACK_DATA or another ACK_OK with payload)
-        // Some devices send another ACK_OK with payload, or ACK_DATA. 
+        // Some devices send another ACK_OK with payload, or ACK_DATA.
         // Our fix handles both if it's the second packet read.
         let mut sizes_payload = vec![0u8; 92];
         // Set user count to 123 (fields[4] is offset 16..20)
@@ -68,7 +68,8 @@ fn test_read_sizes_split_response_tcp() {
     zk.connect(ZKProtocol::TCP).unwrap();
 
     // Trigger read_sizes
-    zk.read_sizes().expect("read_sizes should handle split response");
+    zk.read_sizes()
+        .expect("read_sizes should handle split response");
 
     // Verify fields were populated from the SECOND packet
     assert_eq!(zk.users, 123);
