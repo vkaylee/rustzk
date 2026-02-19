@@ -100,4 +100,45 @@ mod tests {
         };
         assert_eq!(admin_user.user_type(), 14);
     }
+
+    #[test]
+    fn test_attendance_time_logic() {
+        use chrono::NaiveDateTime;
+
+        let naive =
+            NaiveDateTime::parse_from_str("2026-02-19 09:16:41", "%Y-%m-%d %H:%M:%S").unwrap();
+
+        // 1. Test UTC+7 (Vietnam)
+        let att_vn = Attendance {
+            uid: 1,
+            user_id: "101".to_string(),
+            timestamp: naive,
+            status: 1,
+            punch: 0,
+            timezone_offset: 420, // 7 * 60
+        };
+        assert_eq!(att_vn.iso_format(), "2026-02-19T09:16:41+07:00");
+        assert_eq!(
+            att_vn.timestamp_utc().to_rfc3339(),
+            "2026-02-19T02:16:41+00:00"
+        );
+
+        // 2. Test UTC-5 (New York)
+        let att_ny = Attendance {
+            timezone_offset: -300, // -5 * 60
+            ..att_vn.clone()
+        };
+        assert_eq!(att_ny.iso_format(), "2026-02-19T09:16:41-05:00");
+        assert_eq!(
+            att_ny.timestamp_utc().to_rfc3339(),
+            "2026-02-19T14:16:41+00:00"
+        );
+
+        // 3. Test UTC+0
+        let att_utc = Attendance {
+            timezone_offset: 0,
+            ..att_vn.clone()
+        };
+        assert_eq!(att_utc.iso_format(), "2026-02-19T09:16:41+00:00");
+    }
 }

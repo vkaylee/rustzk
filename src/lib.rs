@@ -4,6 +4,7 @@ pub mod protocol;
 
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 
+use chrono::{DateTime, FixedOffset, TimeZone};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, UdpSocket};
@@ -749,10 +750,17 @@ impl ZK {
         self.get_option_value("~ZKFPVersion")
     }
 
-    pub fn get_time(&mut self) -> ZKResult<chrono::NaiveDateTime> {
+    pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>> {
         let res = self.send_command(CMD_GET_TIME, Vec::new())?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
-            ZK::decode_time(&res.payload)
+            let naive = ZK::decode_time(&res.payload)?;
+            let offset = FixedOffset::east_opt(self.timezone_offset * 60)
+                .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+
+            offset
+                .from_local_datetime(&naive)
+                .single()
+                .ok_or_else(|| ZKError::InvalidData("Ambiguous time from device".into()))
         } else {
             Err(ZKError::Response("Can't get time".into()))
         }

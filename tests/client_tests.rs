@@ -903,3 +903,87 @@ fn test_record_count_mismatch_safety() {
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
 }
+
+#[test]
+fn test_timezone_sync_from_device() {
+    use std::io::Cursor;
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    let server_handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("Failed to accept connection");
+        let session_id = 1234;
+
+        loop {
+            let mut header = [0u8; 8];
+            if stream.read_exact(&mut header).is_err() {
+                break;
+            }
+
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            stream.read_exact(&mut body).unwrap();
+
+            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let res_cmd = if packet.command == CMD_CONNECT {
+                CMD_ACK_OK
+            } else if packet.command == CMD_OPTIONS_RRQ {
+                CMD_ACK_OK
+            } else if packet.command == CMD_GET_FREE_SIZES {
+                CMD_ACK_OK
+            } else if packet.command == _CMD_PREPARE_BUFFER {
+                CMD_PREPARE_DATA
+            } else if packet.command == _CMD_READ_BUFFER {
+                CMD_DATA
+            } else {
+                CMD_ACK_OK
+            };
+
+            let mut payload = Vec::new();
+            if packet.command == CMD_CONNECT {
+                payload.write_u16::<LittleEndian>(session_id).unwrap();
+            } else if packet.command == CMD_OPTIONS_RRQ {
+                let key = String::from_utf8_lossy(&packet.payload)
+                    .trim_matches('\0')
+                    .to_string();
+                if key == "TZAdj" {
+                    payload.extend_from_slice(b"TZAdj=8\0");
+                }
+            } else if packet.command == CMD_GET_FREE_SIZES {
+                payload.resize(80, 0);
+                let mut p_writer = Cursor::new(&mut payload);
+                p_writer.set_position(32);
+                p_writer.write_i32::<LittleEndian>(1).unwrap();
+            } else if packet.command == _CMD_PREPARE_BUFFER {
+                payload.push(0); // Dummy byte for offset
+                payload.write_u32::<LittleEndian>(12).unwrap(); // 4 header + 8 log
+            } else if packet.command == _CMD_READ_BUFFER {
+                payload.write_u32::<LittleEndian>(8).unwrap(); // Header: total size of logs
+                payload.write_u16::<LittleEndian>(101).unwrap();
+                payload.push(1);
+                payload.write_u32::<LittleEndian>(839845230).unwrap();
+                payload.push(0);
+            }
+
+            let res_packet = ZKPacket::new(res_cmd, session_id, packet.reply_id, payload);
+            stream
+                .write_all(&TCPWrapper::wrap(&res_packet.to_bytes()))
+                .unwrap();
+        }
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+
+    zk.read_sizes().unwrap();
+    assert_eq!(zk.timezone_offset, 480);
+
+    let logs = zk.get_attendance().unwrap();
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].timezone_offset, 480);
+    assert_eq!(logs[0].iso_format().ends_with("+08:00"), true);
+
+    zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}

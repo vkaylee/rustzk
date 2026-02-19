@@ -19,6 +19,7 @@ fn main() {
     }
 
     println!("Connected!\n");
+    let _ = zk.read_sizes();
 
     match zk.get_mac() {
         Ok(mac) => println!("MAC Address: {}", mac),
@@ -31,7 +32,7 @@ fn main() {
     }
 
     match zk.get_time() {
-        Ok(t) => println!("Device Time: {}", t),
+        Ok(t) => println!("Device Time: {} (ISO: {})", t, t.to_rfc3339()),
         Err(e) => println!("Failed to get Time: {}", e),
     }
 
