@@ -9,6 +9,7 @@ use std::thread;
 
 #[test]
 fn test_request_response_misalignment_tcp() {
+    let _ = env_logger::builder().is_test(true).try_init();
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
     let addr = listener.local_addr().unwrap();
     let port = addr.port();
@@ -77,6 +78,7 @@ fn test_request_response_misalignment_tcp() {
 
 #[test]
 fn test_receive_chunk_misalignment_tcp() {
+    let _ = env_logger::builder().is_test(true).try_init();
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
     let addr = listener.local_addr().unwrap();
     let port = addr.port();

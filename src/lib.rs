@@ -133,7 +133,7 @@ impl ZK {
                 match self.connect_tcp() {
                     Ok(_) => Ok(()),
                     Err(e) => {
-                        println!("TCP connect failed: {}. Falling back to UDP...", e);
+                        log::info!("TCP connect failed: {}. Falling back to UDP...", e);
                         self.connect_udp()
                     }
                 }
@@ -260,9 +260,10 @@ impl ZK {
 
             if res_packet.reply_id != self.reply_id {
                 discarded += 1;
-                eprintln!(
-                    "[WARN] Reply ID mismatch: expected {}, got {}. Discarding packet.",
-                    self.reply_id, res_packet.reply_id
+                log::warn!(
+                    "Reply ID mismatch: expected {}, got {}. Discarding packet.",
+                    self.reply_id,
+                    res_packet.reply_id
                 );
                 if discarded > MAX_DISCARDED_PACKETS {
                     return Err(ZKError::Response("Too many discarded packets".into()));
