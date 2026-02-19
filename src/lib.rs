@@ -247,9 +247,12 @@ impl ZK {
         let mut discarded = 0;
         loop {
             let res_packet = self.read_packet()?;
+            // Log packet at debug level for troubleshooting if needed
+            log::debug!("Received Packet: Cmd {} (0x{:X}), Reply ID: {}", res_packet.command, res_packet.command, res_packet.reply_id);
+
             if res_packet.reply_id != self.reply_id {
                 discarded += 1;
-                log::warn!(
+                log::debug!(
                     "Reply ID mismatch: expected {}, got {}. Discarding packet.",
                     self.reply_id,
                     res_packet.reply_id
@@ -271,6 +274,8 @@ impl ZK {
         if self.reply_id == USHRT_MAX {
             self.reply_id -= USHRT_MAX;
         }
+
+        log::debug!("Sending Command: {} (0x{:X}), Reply ID: {}", command, command, self.reply_id);
 
         let packet = ZKPacket::new(command, self.session_id, self.reply_id, payload);
 
@@ -298,7 +303,24 @@ impl ZK {
     }
 
     pub fn read_sizes(&mut self) -> ZKResult<()> {
-        let res = self.send_command(CMD_GET_FREE_SIZES, Vec::new())?;
+        let mut res = self.send_command(CMD_GET_FREE_SIZES, Vec::new())?;
+        
+        // Handle case where device sends ACK_OK then ACK_DATA/Response separately
+        if res.command == CMD_ACK_OK && res.payload.len() < 16 {
+             // Try reading the next packet which should contain the actual data
+             // We use a short timeout or just read_response_safe which matches reply_id
+             match self.read_response_safe() {
+                Ok(next_packet) => {
+                    res = next_packet;
+                }
+                Err(e) => {
+                    // If we time out or fail, just proceed with the first packet (which might be empty/error)
+                    // But if it was just a pure ACK, we might want to log it.
+                    log::debug!("read_sizes: received ACK_OK but failed to read subsequent data: {}", e);
+                }
+             }
+        }
+
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
             let data = res.payload;
             if data.len() >= 80 {
