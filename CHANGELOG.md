@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.4] - 2026-02-20
+### Added
+- **High-Performance Caching**: Implemented an internal `user_id_cache` to speed up attendance log processing by mapping UIDs to User IDs locally.
+- **Bulk User Management**: Added `set_user_unchecked()` to allow high-speed user syncing without redundant uniqueness checks.
+- **Public Capacity Getters**: Added public getter methods for all device capacity fields (`users()`, `fingers()`, `records()`, etc.) to align with new encapsulation standards.
+
+### Changed
+- **Optimized Attendance Retrieval**: `get_attendance()` now uses the internal cache, significantly reducing network traffic and processing time for large datasets.
+- **Improved Code Quality**: Applied comprehensive formatting via `cargo fmt` and resolved all `clippy` warnings.
+
 ## [0.4.3] - 2026-02-20
 ### Added
 - **Real-time Event Monitoring**: Implemented `listen_events()` providing an infinite iterator for live attendance logs. Supports multiple device event formats (10, 12, and 32 bytes).
