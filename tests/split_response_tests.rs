@@ -90,8 +90,8 @@ fn test_read_sizes_split_response_tcp() {
         .expect("read_sizes should handle split response");
 
     // Verify fields were populated from the SECOND packet
-    assert_eq!(zk.users, 123);
-    assert_eq!(zk.records, 456);
+    assert_eq!(zk.users(), 123);
+    assert_eq!(zk.records(), 456);
 
     server_handle.join().unwrap();
 }

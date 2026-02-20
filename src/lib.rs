@@ -5,6 +5,7 @@ pub mod protocol;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike};
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
@@ -46,16 +47,17 @@ pub struct ZK {
     reply_id: u16,
     pub timeout: Duration,
     pub is_connected: bool,
+    user_id_cache: Option<HashMap<u16, String>>,
     pub user_packet_size: usize,
-    pub users: u32,
-    pub fingers: u32,
-    pub records: u32,
-    pub cards: i32,
-    pub faces: u32,
-    pub fingers_cap: i32,
-    pub users_cap: i32,
-    pub rec_cap: i32,
-    pub faces_cap: i32,
+    users: u32,
+    fingers: u32,
+    records: u32,
+    cards: i32,
+    faces: u32,
+    fingers_cap: i32,
+    users_cap: i32,
+    rec_cap: i32,
+    faces_cap: i32,
     pub encoding: String,
     password: u32,
     timezone_offset: i32, // Offset in minutes
@@ -71,6 +73,7 @@ impl ZK {
             reply_id: USHRT_MAX - 1,
             timeout: Duration::from_secs(60),
             is_connected: false,
+            user_id_cache: None,
             user_packet_size: 28,
             users: 0,
             fingers: 0,
@@ -669,9 +672,6 @@ impl ZK {
             return Ok(Vec::new());
         }
 
-        // Resolve uid → user_id after attendance data is safely in memory.
-        let users = self.get_users().unwrap_or_default();
-
         let total_size = byteorder::LittleEndian::read_u32(&attendance_data[0..4]) as usize;
         let record_size = if self.records > 0 {
             total_size / self.records as usize
@@ -696,11 +696,7 @@ impl ZK {
                 let punch = rdr.read_u8()?;
 
                 let timestamp = ZK::decode_time(&time_bytes)?;
-                let user_id = users
-                    .iter()
-                    .find(|u| u.uid == uid)
-                    .map(|u| u.user_id.clone())
-                    .unwrap_or_else(|| uid.to_string());
+                let user_id = self.get_user_id_from_cache(uid);
 
                 attendances.push(Attendance {
                     uid: uid as u32,
@@ -727,11 +723,7 @@ impl ZK {
 
                 let timestamp = ZK::decode_time(&time_bytes)?;
                 let user_id = user_id_num.to_string();
-                let uid = users
-                    .iter()
-                    .find(|u| u.user_id == user_id)
-                    .map(|u| u.uid as u32)
-                    .unwrap_or(user_id_num);
+                let uid = user_id_num;
 
                 attendances.push(Attendance {
                     uid,
@@ -937,6 +929,7 @@ impl ZK {
 
     /// Creates or updates a user on the device.
     /// Ensures User ID uniqueness to prevent logic conflicts.
+    /// **Performance Note:** This performs an O(N) fetch of all users first. For bulk operations, use `set_user_unchecked`.
     pub fn set_user(&mut self, user: &User) -> ZKResult<()> {
         // 1. Safety Check: Ensure this User ID doesn't already exist under a DIFFERENT UID.
         // If it exists under the SAME UID, it's an update, which is allowed.
@@ -950,6 +943,12 @@ impl ZK {
             }
         }
 
+        self.set_user_unchecked(user)
+    }
+
+    /// Creates or updates a user on the device WITHOUT uniqueness checks.
+    /// High performance, suitable for bulk syncing.
+    pub fn set_user_unchecked(&mut self, user: &User) -> ZKResult<()> {
         let mut payload = Vec::new();
 
         if self.user_packet_size == 28 {
@@ -1264,11 +1263,45 @@ impl ZK {
         }
 
         /// Returns true if the timezone has been synchronized with the device.
-        pub fn timezone_synced(&self) -> bool {
-            self.timezone_synced
-        }
-    }
-    impl Drop for ZK {
+            pub fn timezone_synced(&self) -> bool {
+                self.timezone_synced
+            }
+        
+            /// Explicitly refreshes the internal user ID cache.
+            pub fn refresh_user_cache(&mut self) -> ZKResult<()> {
+                let users = self.get_users()?;
+                let mut cache = HashMap::with_capacity(users.len());
+                for user in users {
+                    cache.insert(user.uid, user.user_id);
+                }
+                self.user_id_cache = Some(cache);
+                Ok(())
+            }
+        
+            /// Internal helper to get User ID for a UID, using cache if available.
+            fn get_user_id_from_cache(&mut self, uid: u16) -> String {
+                if self.user_id_cache.is_none() {
+                    let _ = self.refresh_user_cache();
+                }
+                
+                self.user_id_cache
+                    .as_ref()
+                    .and_then(|c| c.get(&uid).cloned())
+                    .unwrap_or_else(|| uid.to_string())
+            }
+        
+            pub fn users(&self) -> u32 { self.users }
+            pub fn users_cap(&self) -> i32 { self.users_cap }
+            pub fn fingers(&self) -> u32 { self.fingers }
+            pub fn fingers_cap(&self) -> i32 { self.fingers_cap }
+            pub fn records(&self) -> u32 { self.records }
+            pub fn records_cap(&self) -> i32 { self.rec_cap }
+            pub fn faces(&self) -> u32 { self.faces }
+                pub fn faces_cap(&self) -> i32 { self.faces_cap }
+                pub fn cards(&self) -> i32 { self.cards }
+                pub fn user_packet_size(&self) -> usize { self.user_packet_size }
+            }
+                impl Drop for ZK {
     fn drop(&mut self) {
         let _ = self.disconnect();
     }

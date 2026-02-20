@@ -137,8 +137,8 @@ fn test_full_device_flow_mock() {
     zk.connect(ZKProtocol::TCP).unwrap();
 
     zk.read_sizes().unwrap();
-    assert_eq!(zk.users, 1, "Users should be 1");
-    assert_eq!(zk.records, 1, "Records should be 1");
+    assert_eq!(zk.users(), 1, "Users should be 1");
+    assert_eq!(zk.records(), 1, "Records should be 1");
 
     let users = zk.get_users().unwrap();
     assert_eq!(users.len(), 1);

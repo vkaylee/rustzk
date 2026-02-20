@@ -58,11 +58,11 @@ fn main() {
     // Capacity
     println!("\n--- Capacity ---");
     if zk.read_sizes().is_ok() {
-        println!("Users    : {} / {}", zk.users, zk.users_cap);
-        println!("Records  : {} / {}", zk.records, zk.rec_cap);
-        println!("Fingers  : {} / {}", zk.fingers, zk.fingers_cap);
-        if zk.faces_cap > 0 {
-            println!("Faces    : {} / {}", zk.faces, zk.faces_cap);
+        println!("Users    : {} / {}", zk.users(), zk.users_cap());
+        println!("Records  : {} / {}", zk.records(), zk.records_cap());
+        println!("Fingers  : {} / {}", zk.fingers(), zk.fingers_cap());
+        if zk.faces_cap() > 0 {
+            println!("Faces    : {} / {}", zk.faces(), zk.faces_cap());
         }
     }
 

@@ -1,4 +1,4 @@
-use byteorder::{LittleEndian, WriteBytesExt, ByteOrder};
+use byteorder::{LittleEndian, WriteBytesExt};
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::{ZKProtocol, ZK};
