@@ -461,3 +461,143 @@ fn test_delete_user_mock() {
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
 }
+
+#[test]
+fn test_set_users_bulk_mock() {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    let server_handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let session_id = 4444;
+
+        loop {
+            let mut header = [0u8; 8];
+            if stream.read_exact(&mut header).is_err() {
+                break;
+            }
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            stream.read_exact(&mut body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
+
+            match packet.command {
+                CMD_CONNECT => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_GET_FREE_SIZES => {
+                    let mut bytes = vec![0u8; 80];
+                    <LittleEndian as ByteOrder>::write_i32(&mut bytes[16..20], 0);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, bytes);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                _CMD_PREPARE_BUFFER => {
+                    // Empty list for get_users
+                    let mut res_payload = vec![0u8; 5];
+                    res_payload[0] = 1;
+                    <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 4); 
+                    let res = ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                _CMD_READ_BUFFER => {
+                    let mut data = Vec::new();
+                    data.write_i32::<LittleEndian>(0).unwrap();
+                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, data);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_USER_WRQ => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_REFRESHDATA => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_EXIT => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                    break;
+                }
+                _ => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+            }
+        }
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+
+    let users = vec![
+        User {
+            uid: 1,
+            user_id: "101".to_string(),
+            name: "User 1".to_string(),
+            privilege: USER_DEFAULT,
+            password: "".to_string(),
+            group_id: "1".to_string(),
+            card: 0,
+        },
+        User {
+            uid: 2,
+            user_id: "102".to_string(),
+            name: "User 2".to_string(),
+            privilege: USER_DEFAULT,
+            password: "".to_string(),
+            group_id: "1".to_string(),
+            card: 0,
+        },
+    ];
+
+    let result = zk.set_users_bulk(&users);
+    assert!(result.is_ok());
+
+    // Test internal batch conflict
+    let conflict_batch = vec![
+        User {
+            uid: 3,
+            user_id: "103".to_string(),
+            name: "User 3".to_string(),
+            privilege: USER_DEFAULT,
+            password: "".to_string(),
+            group_id: "1".to_string(),
+            card: 0,
+        },
+        User {
+            uid: 4,
+            user_id: "103".to_string(), // SAME ID
+            name: "User 4".to_string(),
+            privilege: USER_DEFAULT,
+            password: "".to_string(),
+            group_id: "1".to_string(),
+            card: 0,
+        },
+    ];
+
+    let result = zk.set_users_bulk(&conflict_batch);
+    assert!(result.is_err());
+    assert!(format!("{}", result.unwrap_err()).contains("Conflict in batch"));
+
+    zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}

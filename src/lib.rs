@@ -961,9 +961,56 @@ impl ZK {
         self.set_user_unchecked(user)
     }
 
+    /// Creates or updates multiple users on the device in a single operation.
+    /// This is highly efficient as it fetches the user list and refreshes data only once.
+    /// Performs safety checks for User ID uniqueness across the batch and existing users.
+    pub fn set_users_bulk(&mut self, users: &[User]) -> ZKResult<()> {
+        if users.is_empty() {
+            return Ok(());
+        }
+
+        // 1. Fetch existing users once to build a conflict map
+        let existing_users = self.get_users()?;
+        let mut user_id_to_uid: HashMap<String, u16> = existing_users
+            .into_iter()
+            .map(|u| (u.user_id, u.uid))
+            .collect();
+
+        // 2. Perform uniqueness checks for the entire batch
+        for user in users {
+            if let Some(&existing_uid) = user_id_to_uid.get(&user.user_id) {
+                if existing_uid != user.uid {
+                    return Err(ZKError::Response(format!(
+                        "Conflict in batch: User ID '{}' already exists on device at UID {}",
+                        user.user_id, existing_uid
+                    )));
+                }
+            }
+            
+            // Update local map to reflect the new state for subsequent users in the batch
+            user_id_to_uid.insert(user.user_id.clone(), user.uid);
+        }
+
+        // 3. Send all users without individual refreshes
+        for user in users {
+            self.set_user_unchecked_no_refresh(user)?;
+        }
+
+        // 4. Refresh device data once at the end
+        let _ = self.refresh_data();
+        Ok(())
+    }
+
     /// Creates or updates a user on the device WITHOUT uniqueness checks.
     /// High performance, suitable for bulk syncing.
     pub fn set_user_unchecked(&mut self, user: &User) -> ZKResult<()> {
+        self.set_user_unchecked_no_refresh(user)?;
+        let _ = self.refresh_data();
+        Ok(())
+    }
+
+    /// Internal helper to set a user without sending a REFRESHDATA command.
+    fn set_user_unchecked_no_refresh(&mut self, user: &User) -> ZKResult<()> {
         let mut payload = Vec::new();
 
         if self.user_packet_size == 28 {
@@ -1026,7 +1073,6 @@ impl ZK {
 
         let res = self.send_command(CMD_USER_WRQ, payload)?;
         if res.command == CMD_ACK_OK {
-            let _ = self.refresh_data();
             Ok(())
         } else {
             Err(ZKError::Response("Failed to set user".into()))
