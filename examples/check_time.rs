@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (args[1].clone(), 4370)
     } else {
         eprintln!("Usage: {} <ip> [port]", args[0]);
-        eprintln!("Example: {} 192.168.12.13 4370", args[0]);
+        eprintln!("Example: {} 192.168.1.201 4370", args[0]);
         std::process::exit(1);
     };
 

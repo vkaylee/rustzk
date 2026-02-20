@@ -3,10 +3,16 @@ use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let (ip, port) = if args.len() >= 3 {
-        (args[1].clone(), args[2].parse().unwrap_or(4370))
+    if args.len() < 2 {
+        eprintln!("Usage: {} <ip> [port]", args[0]);
+        eprintln!("Example: {} 192.168.1.201 4370", args[0]);
+        std::process::exit(1);
+    }
+    let ip = args[1].clone();
+    let port = if args.len() > 2 {
+        args[2].parse().unwrap_or(4370)
     } else {
-        ("192.168.12.14".to_string(), 4370)
+        4370
     };
 
     println!("Checking device info for {}:{}...", ip, port);
@@ -19,7 +25,6 @@ fn main() {
     }
 
     println!("Connected!\n");
-    let _ = zk.read_sizes();
 
     match zk.get_mac() {
         Ok(mac) => println!("MAC Address: {}", mac),
