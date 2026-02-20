@@ -1004,19 +1004,21 @@ impl ZK {
         }
     }
 
-        /// Helper to find the next available UID on the device.
-        pub fn get_next_free_uid(&mut self) -> ZKResult<u16> {
-            let users = self.get_users()?;
-            let max_uid = users.iter().map(|u| u.uid).max().unwrap_or(0);
-    
-            if max_uid >= 65535 {
-                return Err(ZKError::Response("Device is full (max UID reached)".into()));
+            /// Helper to find the next available UID on the device.
+            /// `start_uid`: The UID to start searching from (useful for testing in high ranges).
+            pub fn get_next_free_uid(&mut self, start_uid: u16) -> ZKResult<u16> {
+                let users = self.get_users()?;
+                let used_uids: std::collections::HashSet<u16> = users.iter().map(|u| u.uid).collect();
+                
+                for uid in start_uid..=65535 {
+                    if !used_uids.contains(&uid) {
+                        return Ok(uid);
+                    }
+                }
+                
+                Err(ZKError::Response("No free UID found in the specified range".into()))
             }
-    
-            Ok(max_uid + 1)
-        }
-    
-        /// Finds a user on the device by their alphanumeric User ID.
+                /// Finds a user on the device by their alphanumeric User ID.
         pub fn find_user_by_id(&mut self, user_id: &str) -> ZKResult<Option<User>> {
             let users = self.get_users()?;
             Ok(users.into_iter().find(|u| u.user_id == user_id))

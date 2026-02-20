@@ -24,10 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Connected!\n");
 
-    // 1. Automatically find the next available UID
-    println!("Detecting next available UID...");
-    let next_uid = zk.get_next_free_uid()?;
-    println!("Next available UID: {}\n", next_uid);
+    // 1. Find a safe UID for testing (start from 65000 to avoid real users)
+    println!("Detecting safe UID for testing (range 65000+)...");
+    let next_uid = zk.get_next_free_uid(65000)?;
+    println!("Selected safe UID: {}\n", next_uid);
 
     // 2. Create a new user object using the discovered UID
     let user_id_str = next_uid.to_string();
