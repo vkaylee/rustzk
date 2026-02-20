@@ -999,11 +999,11 @@ fn test_timezone_sync_from_device() {
     zk.connect(ZKProtocol::TCP).unwrap();
 
     zk.read_sizes().unwrap();
-    assert_eq!(zk.timezone_offset, 480);
+    assert_eq!(zk.timezone_offset(), 480);
 
     let logs = zk.get_attendance().unwrap();
     assert_eq!(logs.len(), 1);
-    assert_eq!(logs[0].timezone_offset, 480);
+    assert_eq!(logs[0].timezone_offset(), 480);
     assert_eq!(logs[0].iso_format().ends_with("+08:00"), true);
 
     zk.disconnect().unwrap();

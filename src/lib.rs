@@ -5,7 +5,6 @@ pub mod protocol;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike};
-use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
@@ -42,11 +41,10 @@ pub enum ZKProtocol {
 
 pub struct ZK {
     pub addr: String,
-    pub transport: Option<ZKTransport>,
-    pub session_id: u16,
-    pub reply_id: u16,
+    transport: Option<ZKTransport>,
+    session_id: u16,
+    reply_id: u16,
     pub timeout: Duration,
-    pub user_map: HashMap<String, String>,
     pub is_connected: bool,
     pub user_packet_size: usize,
     pub users: u32,
@@ -59,9 +57,9 @@ pub struct ZK {
     pub rec_cap: i32,
     pub faces_cap: i32,
     pub encoding: String,
-    pub password: u32,
-    pub timezone_offset: i32, // Offset in minutes
-    pub timezone_synced: bool,
+    password: u32,
+    timezone_offset: i32, // Offset in minutes
+    timezone_synced: bool,
 }
 
 impl ZK {
@@ -72,7 +70,6 @@ impl ZK {
             session_id: 0,
             reply_id: USHRT_MAX - 1,
             timeout: Duration::from_secs(60),
-            user_map: HashMap::new(), // Initialized
             is_connected: false,
             user_packet_size: 28,
             users: 0,
@@ -479,7 +476,7 @@ impl ZK {
         }
     }
 
-    pub(crate) fn read_with_buffer(
+    fn read_with_buffer(
         &mut self,
         command: u16,
         fct: u8,
@@ -1035,6 +1032,16 @@ impl ZK {
         pub fn find_user_by_id(&mut self, user_id: &str) -> ZKResult<Option<User>> {
             let users = self.get_users()?;
             Ok(users.into_iter().find(|u| u.user_id == user_id))
+        }
+
+        /// Returns the detected timezone offset in minutes.
+        pub fn timezone_offset(&self) -> i32 {
+            self.timezone_offset
+        }
+
+        /// Returns true if the timezone has been synchronized with the device.
+        pub fn timezone_synced(&self) -> bool {
+            self.timezone_synced
         }
     }
     impl Drop for ZK {

@@ -14,7 +14,7 @@ pub struct Attendance {
     /// Punch type (e.g., finger, face, card).
     pub punch: u8,
     /// The timezone offset in minutes applied to this record.
-    pub timezone_offset: i32,
+    pub(crate) timezone_offset: i32,
 }
 
 impl Attendance {
@@ -40,6 +40,11 @@ impl Attendance {
     /// Returns the timestamp formatted as an ISO8601 string with offset.
     pub fn iso_format(&self) -> String {
         self.timestamp_fixed().to_rfc3339()
+    }
+
+    /// Returns the timezone offset in minutes applied to this record.
+    pub fn timezone_offset(&self) -> i32 {
+        self.timezone_offset
     }
 }
 

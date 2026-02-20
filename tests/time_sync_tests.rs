@@ -70,17 +70,18 @@ fn test_lazy_timezone_sync_on_get_time() {
 
     let mut zk = ZK::new("127.0.0.1", port);
 
-    // 1. Connect (should NOT sync timezone yet)
-    zk.connect(ZKProtocol::TCP).unwrap();
-    assert!(!zk.timezone_synced);
-    assert_eq!(zk.timezone_offset, 0);
-
-    // 2. Call get_time (should trigger lazy sync)
-    let time = zk.get_time().unwrap();
-
-    // 3. Verify sync happened
-    assert!(zk.timezone_synced);
-    assert_eq!(zk.timezone_offset, 7 * 60); // 420 minutes
+        // 1. Connect (should NOT sync timezone yet)
+        zk.connect(ZKProtocol::TCP).unwrap();
+        assert!(!zk.timezone_synced());
+        assert_eq!(zk.timezone_offset(), 0);
+    
+        // 2. Call get_time (should trigger lazy sync)
+        let time = zk.get_time().unwrap();
+        
+        // 3. Verify sync happened
+        assert!(zk.timezone_synced());
+        assert_eq!(zk.timezone_offset(), 7 * 60); // 420 minutes
+    
     assert_eq!(time.timezone().local_minus_utc(), 7 * 3600);
 
     server_handle.join().unwrap();
@@ -172,12 +173,12 @@ fn test_lazy_sync_happens_only_once() {
 
     // First call: Triggers sync
     zk.get_time().unwrap();
-    assert!(zk.timezone_synced);
-    assert_eq!(zk.timezone_offset, 8 * 60);
+    assert!(zk.timezone_synced());
+    assert_eq!(zk.timezone_offset(), 8 * 60);
 
     // Second call: Should reuse cached offset
     zk.get_time().unwrap();
-    assert!(zk.timezone_synced);
+    assert!(zk.timezone_synced());
 
     server_handle.join().unwrap();
 }
