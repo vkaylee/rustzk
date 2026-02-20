@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
 - **Zero-Copy Protocol Representation**: Refactored `ZKPacket` to use `std::borrow::Cow` for payloads, allowing zero-copy parsing from buffers.
 - **Buffer-Centric Data Retrieval**: Introduced `read_chunk_into` and `receive_chunk_into` to allow streaming data directly into pre-allocated vectors, drastically reducing allocation overhead for large attendance logs.
 - **Optimized TCP Wrapping**: Streamlined `send_command` to perform single-buffer allocation for wrapped TCP packets.
-- **New Tests**: Added unit tests for time encoding and integration tests for `set_time`.
+- **New Tests**: Added unit tests for time encoding, integration tests for `set_time`, and specialized `time_sync_tests` to verify lazy localization and offset caching.
 
 ### Changed
 - Refined `read_packet` to eliminate redundant intermediate allocations during packet body reads.

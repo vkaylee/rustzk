@@ -15,6 +15,7 @@
 ## Testing Suite
 - **`tests/client_tests.rs`**: Integration tests using a stateful Mock Server to verify full connection and data retrieval flows.
 - **`tests/parsing_tests.rs`**: Unit tests for decoding raw byte streams into model structures.
+- **`tests/time_sync_tests.rs`**: Specialized tests for verifying lazy timezone synchronization and offset caching logic.
 - **`examples/check_time.rs`**: Practical demonstration of localized time retrieval and drift analysis.
 
 ## CI/CD Workflows
