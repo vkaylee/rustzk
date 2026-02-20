@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-02-20
+### Changed
+- **Safety Hardening**: Replaced potential panic points (`unwrap()`) in protocol serialization with robust `io::Result` error handling.
+- **Documentation**: Added comprehensive doc comments to all public models (`User`, `Attendance`) and core library methods (`connect`, `get_time`, etc.).
+- **Example Refinement**: Standardized example usage and removed hardcoded fallback IPs for safer testing.
+
 ## [0.4.0] - 2026-02-20
 ### Added
 - **Device Time Synchronization**: Implemented `set_time` and `encode_time` to allow updating the device's clock.
