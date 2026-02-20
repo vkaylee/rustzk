@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Create a new user object
     let new_user = User {
         uid: 65500,                // High UID to avoid collision
-        user_id: "9999999".into(), // Alphanumeric User ID
+        user_id: "65500".into(),   // Same as UID
         name: "Rust Dev".into(),
         privilege: USER_DEFAULT,
         password: "".into(),
