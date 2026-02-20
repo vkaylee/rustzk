@@ -19,27 +19,37 @@ pub struct Attendance {
 
 impl Attendance {
     /// Returns the timestamp as a DateTime with the device's fixed offset.
-    pub fn timestamp_fixed(&self) -> DateTime<FixedOffset> {
+    /// 
+    /// **Note:** This method attempts to map the raw local time from the device 
+    /// to a specific offset. It may return `None` if the time is invalid or 
+    /// ambiguous (e.g., during DST transitions). 
+    /// 
+    /// For critical operations, prefer using the raw `.timestamp` (NaiveDateTime) 
+    /// and handle timezones at the application level.
+    pub fn timestamp_fixed(&self) -> Option<DateTime<FixedOffset>> {
+        // Sanity check: limit offset to +/- 24 hours (1440 minutes)
+        if self.timezone_offset.abs() > 1440 {
+            return None;
+        }
         let offset = FixedOffset::east_opt(self.timezone_offset * 60)
             .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
         offset
             .from_local_datetime(&self.timestamp)
             .single()
-            .unwrap_or_else(|| {
-                // Fallback for ambiguous or non-existent times during DST transitions
-                DateTime::<FixedOffset>::from_naive_utc_and_offset(self.timestamp, offset)
-            })
     }
 
     /// Returns the timestamp in UTC.
-    pub fn timestamp_utc(&self) -> DateTime<Utc> {
-        let fixed = self.timestamp_fixed();
-        fixed.with_timezone(&Utc)
+    pub fn timestamp_utc(&self) -> Option<DateTime<Utc>> {
+        self.timestamp_fixed().map(|fixed| fixed.with_timezone(&Utc))
     }
 
     /// Returns the timestamp formatted as an ISO8601 string with offset.
+    /// Returns a naive ISO8601 string if the offset mapping fails.
     pub fn iso_format(&self) -> String {
-        self.timestamp_fixed().to_rfc3339()
+        match self.timestamp_fixed() {
+            Some(fixed) => fixed.to_rfc3339(),
+            None => self.timestamp.format("%Y-%m-%dT%H:%M:%S").to_string(),
+        }
     }
 
     /// Returns the timezone offset in minutes applied to this record.
@@ -147,7 +157,7 @@ mod tests {
         };
         assert_eq!(att_vn.iso_format(), "2026-02-19T09:16:41+07:00");
         assert_eq!(
-            att_vn.timestamp_utc().to_rfc3339(),
+            att_vn.timestamp_utc().unwrap().to_rfc3339(),
             "2026-02-19T02:16:41+00:00"
         );
 
@@ -158,7 +168,7 @@ mod tests {
         };
         assert_eq!(att_ny.iso_format(), "2026-02-19T09:16:41-05:00");
         assert_eq!(
-            att_ny.timestamp_utc().to_rfc3339(),
+            att_ny.timestamp_utc().unwrap().to_rfc3339(),
             "2026-02-19T14:16:41+00:00"
         );
 
@@ -168,5 +178,29 @@ mod tests {
             ..att_vn.clone()
         };
         assert_eq!(att_utc.iso_format(), "2026-02-19T09:16:41+00:00");
+    }
+
+    #[test]
+    fn test_attendance_safety_fallback() {
+        use chrono::NaiveDateTime;
+        let naive = NaiveDateTime::parse_from_str("2026-02-19 09:16:41", "%Y-%m-%d %H:%M:%S").unwrap();
+
+        // Test with an invalid offset (e.g., 25 hours = 1500 minutes)
+        // Our sanity check in timestamp_fixed should return None for offsets > 24h
+        let att_invalid = Attendance {
+            uid: 1,
+            user_id: "101".to_string(),
+            timestamp: naive,
+            status: 1,
+            punch: 0,
+            timezone_offset: 1500, 
+        };
+
+        // Should not panic, should return None
+        assert!(att_invalid.timestamp_fixed().is_none());
+        assert!(att_invalid.timestamp_utc().is_none());
+
+        // ISO format should fallback to naive representation
+        assert_eq!(att_invalid.iso_format(), "2026-02-19T09:16:41");
     }
 }

@@ -840,6 +840,11 @@ impl ZK {
         self.get_option_value("~ZKFPVersion")
     }
 
+    /// Retrieves the current time from the device.
+    /// 
+    /// **Note:** This returns the time as configured on the device, mapped to 
+    /// the detected timezone offset. If the device time falls into a DST 
+    /// transition gap (non-existent time), this will return an error.
     pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>> {
         let _ = self.sync_timezone();
         let res = self.send_command(CMD_GET_TIME, Vec::new())?;
