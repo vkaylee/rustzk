@@ -1,7 +1,7 @@
-use std::borrow::Cow;
 use crate::constants::*;
 use crate::{ZKError, ZKResult};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::borrow::Cow;
 use std::io::{self, Cursor};
 
 /// Calculates the ZK protocol checksum for the given data.
@@ -53,7 +53,12 @@ pub struct ZKPacket<'a> {
 
 impl<'a> ZKPacket<'a> {
     /// Creates a new ZKPacket and automatically calculates the checksum.
-    pub fn new(command: u16, session_id: u16, reply_id: u16, payload: impl Into<Cow<'a, [u8]>>) -> Self {
+    pub fn new(
+        command: u16,
+        session_id: u16,
+        reply_id: u16,
+        payload: impl Into<Cow<'a, [u8]>>,
+    ) -> Self {
         let mut packet = ZKPacket {
             command,
             checksum: 0,

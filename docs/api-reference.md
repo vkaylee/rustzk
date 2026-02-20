@@ -19,6 +19,12 @@ Connects to the device using the specified protocol.
 ### `pub fn get_attendance(&mut self) -> ZKResult<Vec<Attendance>>`
 Retrieves all attendance logs from the device.
 
+### `pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>>`
+Retrieves the current device time, adjusted for the detected timezone.
+
+### `pub fn set_time(&mut self, t: DateTime<FixedOffset>) -> ZKResult<()>`
+Sets the device time to the specified timestamp.
+
 ### `pub fn get_users(&mut self) -> ZKResult<Vec<User>>`
 Retrieves all users from the device.
 

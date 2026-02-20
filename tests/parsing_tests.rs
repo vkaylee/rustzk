@@ -14,6 +14,27 @@ fn test_parse_attendance_8bytes() {
 }
 
 #[test]
+fn test_encode_time() {
+    let date = NaiveDate::from_ymd_opt(2026, 2, 18).unwrap();
+    let time = date.and_hms_opt(10, 20, 30).unwrap();
+
+    let encoded = ZK::encode_time(time);
+    assert_eq!(encoded, 839845230);
+}
+
+#[test]
+fn test_time_roundtrip() {
+    let date = NaiveDate::from_ymd_opt(2025, 6, 15).unwrap();
+    let time = date.and_hms_opt(14, 45, 0).unwrap();
+
+    let encoded = ZK::encode_time(time);
+    let bytes = encoded.to_le_bytes();
+    let decoded = ZK::decode_time(&bytes).unwrap();
+
+    assert_eq!(time, decoded);
+}
+
+#[test]
 fn test_parse_user_28bytes() {
     // Format: <HB5s8sIxBHI
     let mut data = vec![0x01, 0x00, 0x0E]; // UID: 1, Priv: 14 (Admin)

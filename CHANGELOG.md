@@ -4,9 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.1] - 2026-02-19
 ### Added
+- **Device Time Synchronization**: Implemented `set_time` and `encode_time` to allow updating the device's clock.
+- **Automated Timezone Detection**: Enhanced `read_sizes` to automatically fetch and apply the device's timezone offset (`TZAdj`).
 - **Zero-Copy Protocol Representation**: Refactored `ZKPacket` to use `std::borrow::Cow` for payloads, allowing zero-copy parsing from buffers.
 - **Buffer-Centric Data Retrieval**: Introduced `read_chunk_into` and `receive_chunk_into` to allow streaming data directly into pre-allocated vectors, drastically reducing allocation overhead for large attendance logs.
 - **Optimized TCP Wrapping**: Streamlined `send_command` to perform single-buffer allocation for wrapped TCP packets.
+- **New Tests**: Added unit tests for time encoding and integration tests for `set_time`.
 
 ### Changed
 - Refined `read_packet` to eliminate redundant intermediate allocations during packet body reads.

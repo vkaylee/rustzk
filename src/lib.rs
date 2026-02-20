@@ -4,7 +4,7 @@ pub mod protocol;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use chrono::{DateTime, FixedOffset, TimeZone};
+use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
@@ -287,9 +287,12 @@ impl ZK {
         match transport {
             ZKTransport::Tcp(stream) => {
                 let mut buf = Vec::with_capacity(packet.payload.len() + 16);
-                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1).unwrap();
-                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2).unwrap();
-                buf.write_u32::<LittleEndian>((packet.payload.len() + 8) as u32).unwrap();
+                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)
+                    .unwrap();
+                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)
+                    .unwrap();
+                buf.write_u32::<LittleEndian>((packet.payload.len() + 8) as u32)
+                    .unwrap();
                 packet.to_bytes_into(&mut buf);
                 stream.write_all(&buf)?;
             }
@@ -384,6 +387,19 @@ impl ZK {
         chrono::NaiveDate::from_ymd_opt(year, month, day)
             .and_then(|d: chrono::NaiveDate| d.and_hms_opt(hour, minute, second))
             .ok_or_else(|| ZKError::InvalidData("Invalid date/time".into()))
+    }
+
+    pub fn encode_time(t: chrono::NaiveDateTime) -> u32 {
+        let year = (t.year() % 100) as u32;
+        let month = t.month();
+        let day = t.day();
+        let hour = t.hour();
+        let minute = t.minute();
+        let second = t.second();
+
+        (year * 12 * 31 + (month - 1) * 31 + day - 1) * (24 * 60 * 60)
+            + (hour * 60 + minute) * 60
+            + second
     }
 
     fn receive_chunk_into(&mut self, res: ZKPacket<'static>, data: &mut Vec<u8>) -> ZKResult<()> {
@@ -825,6 +841,21 @@ impl ZK {
                 .ok_or_else(|| ZKError::InvalidData("Ambiguous time from device".into()))
         } else {
             Err(ZKError::Response("Can't get time".into()))
+        }
+    }
+
+    pub fn set_time(&mut self, t: DateTime<FixedOffset>) -> ZKResult<()> {
+        // ZKTeco devices usually work in local time.
+        let local_naive = t.naive_local();
+        let encoded = ZK::encode_time(local_naive);
+        let mut payload = Vec::with_capacity(4);
+        payload.write_u32::<LittleEndian>(encoded)?;
+
+        let res = self.send_command(CMD_SET_TIME, payload)?;
+        if res.command == CMD_ACK_OK {
+            Ok(())
+        } else {
+            Err(ZKError::Response("Failed to set time".into()))
         }
     }
 

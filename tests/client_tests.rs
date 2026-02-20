@@ -1,5 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use chrono::Datelike;
+use chrono::{Datelike, TimeZone};
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::{ZKProtocol, ZK};
@@ -1155,6 +1155,73 @@ fn test_get_attendance_fetches_attlog_before_users() {
     );
     assert_eq!(logs[0].uid, 1);
     assert_eq!(logs[0].status, 1, "status should be 1 (check-in)");
+
+    zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}
+
+#[test]
+fn test_set_time_mock() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    let server_handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let session_id = 7777;
+
+        loop {
+            let mut header = [0u8; 8];
+            if stream.read_exact(&mut header).is_err() {
+                break;
+            }
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            stream.read_exact(&mut body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
+
+            match packet.command {
+                CMD_CONNECT => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_SET_TIME => {
+                    assert_eq!(packet.payload.len(), 4);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_EXIT => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                    break;
+                }
+                _ => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+            }
+        }
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+
+    let target_time = chrono::FixedOffset::east_opt(7 * 3600)
+        .unwrap()
+        .with_ymd_and_hms(2026, 2, 20, 10, 0, 0)
+        .single()
+        .unwrap();
+
+    let result = zk.set_time(target_time);
+    assert!(result.is_ok());
 
     zk.disconnect().unwrap();
     server_handle.join().unwrap();

@@ -1,7 +1,7 @@
 # Codebase Summary
 
 ## Core Modules
-- **`src/lib.rs`**: Main entry point, `ZK` client implementation. Now includes robust memory safety checks and improved authentication error handling.
+- **`src/lib.rs`**: Main entry point, `ZK` client implementation. Now includes robust memory safety checks, improved authentication error handling, and device time synchronization logic (`get_time`, `set_time`).
 - **`src/constants.rs`**: ZK Protocol command codes, flags, and safety limits (e.g., `MAX_RESPONSE_SIZE`).
 - **`src/models.rs`**: Domain models (User, Attendance, Finger).
 - **`src/protocol.rs`**: Packet serialization, checksums, and transport wrapping. Uses a zero-copy design with `Cow` for memory efficiency.
