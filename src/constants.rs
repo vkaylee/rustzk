@@ -116,3 +116,17 @@ pub const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024; // 10MB limit for safety
 pub const MAX_DISCARDED_PACKETS: usize = 100;
 pub const TCP_MAX_CHUNK: usize = 0xFFC0;
 pub const UDP_MAX_CHUNK: usize = 16 * 1024;
+
+// User packet sizes
+pub const USER_PACKET_SIZE_SMALL: usize = 28;
+pub const USER_PACKET_SIZE_LARGE: usize = 72;
+
+// Attendance record sizes
+pub const ATT_RECORD_SIZE_8: usize = 8;
+pub const ATT_RECORD_SIZE_16: usize = 16;
+pub const ATT_RECORD_SIZE_40: usize = 40;
+
+// Event data lengths
+pub const EVENT_DATA_LEN_10: usize = 10;
+pub const EVENT_DATA_LEN_12: usize = 12;
+pub const EVENT_DATA_LEN_32: usize = 32;

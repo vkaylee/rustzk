@@ -30,10 +30,12 @@ pub fn calculate_checksum(data: &[u8]) -> u16 {
         checksum -= USHRT_MAX as u32;
     }
 
-    let mut checksum = checksum as u16;
-    checksum = !checksum;
+    let mut checksum = !(checksum as i32);
+    while checksum < 0 {
+        checksum += USHRT_MAX as i32;
+    }
 
-    checksum
+    checksum as u16
 }
 
 /// Represents a ZK protocol packet.
@@ -101,7 +103,12 @@ impl<'a> ZKPacket<'a> {
             sum -= USHRT_MAX as u32;
         }
 
-        !sum as u16
+        let mut checksum = !(sum as i32);
+        while checksum < 0 {
+            checksum += USHRT_MAX as i32;
+        }
+
+        checksum as u16
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -229,16 +236,16 @@ mod tests {
         let data = vec![0xE8, 0x03, 0x00, 0x00, 0x00, 0x00, 0xFE, 0xFF];
         let checksum = calculate_checksum(&data);
         // Sum: 0x03E8 + 0x0000 + 0x0000 + 0xFFFE = 0x103E6
-        // Adjusted: 0x103E6 - 0xFFFF = 0x03E7
-        // Bitwise NOT: !0x03E7 = 0xFC18
-        assert_eq!(checksum, 0xFC18);
+        // Adjusted: 0x103E6 - 0xFFFF = 0x03E7 (999)
+        // Python style NOT: 65534 - 999 = 64535 (0xFC17)
+        assert_eq!(checksum, 0xFC17);
     }
 
     #[test]
     fn test_zk_packet_new() {
         let packet = ZKPacket::new(1000, 0, 65534, vec![]);
         assert_eq!(packet.command, 1000);
-        assert_eq!(packet.checksum, 0xFC18);
+        assert_eq!(packet.checksum, 0xFC17);
         assert_eq!(packet.session_id, 0);
         assert_eq!(packet.reply_id, 65534);
     }

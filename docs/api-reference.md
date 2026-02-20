@@ -66,3 +66,15 @@ Updates device capacity and usage info.
 
 ### `pub fn unlock(&mut self, seconds: u32) -> ZKResult<()>`
 Sends an unlock command to the device.
+
+### `pub fn disconnect(&mut self) -> ZKResult<()>`
+Gracefully disconnects from the device by sending `CMD_EXIT` and closing the underlying transport.
+
+## Safety & Lifecycle
+
+### Resource Cleanup
+The `ZK` struct implements `Drop`. When a `ZK` instance goes out of scope:
+1. The underlying network transport (TCP or UDP) is closed.
+2. The `is_connected` state is reset.
+
+**Note:** `Drop` specifically **does not** perform network I/O (it does not send `CMD_EXIT`) to prevent blocking hangs during object destruction. For a clean protocol-level exit, you should call `zk.disconnect()` explicitly before the object is dropped.

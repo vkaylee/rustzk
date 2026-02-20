@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 #[test]
-fn test_zk_auto_disconnect_on_drop() {
+fn test_zk_drop_does_not_perform_network_io() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
     let addr = listener.local_addr().unwrap();
     let port = addr.port();
@@ -45,12 +45,7 @@ fn test_zk_auto_disconnect_on_drop() {
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                     break;
                 }
-                _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
+                _ => {}
             }
         }
     });
@@ -59,14 +54,16 @@ fn test_zk_auto_disconnect_on_drop() {
         let mut zk = ZK::new("127.0.0.1", port);
         zk.connect(ZKProtocol::TCP).expect("Failed to connect");
         assert!(zk.is_connected);
-        // zk will be dropped at the end of this block
+        // zk will be dropped at the end of this block.
+        // It should NOT send CMD_EXIT.
     }
 
-    // Check if CMD_EXIT was received by the mock server
-    let received_exit = rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("Mock server did not receive CMD_EXIT on drop");
-    assert!(received_exit, "CMD_EXIT was not received");
+    // Check if CMD_EXIT was received by the mock server (it should NOT be)
+    let result = rx.recv_timeout(Duration::from_millis(500));
+    assert!(
+        result.is_err(),
+        "Mock server received CMD_EXIT unexpectedly from Drop"
+    );
 }
 
 #[test]

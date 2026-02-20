@@ -560,7 +560,13 @@ impl ZK {
             .iter()
             .position(|&x| x == 0)
             .map_or(bytes, |i| &bytes[..i]);
-        let (cow, _, _) = encoding_rs::GBK.decode(trimmed);
+        let (cow, _encoding, has_malformed) = encoding_rs::GBK.decode(trimmed);
+        if has_malformed {
+            log::warn!(
+                "GBK decoding encountered malformed sequences in data: {:?}",
+                trimmed
+            );
+        }
         cow.into_owned()
     }
 
@@ -583,9 +589,9 @@ impl ZK {
         let mut users = Vec::new();
         let mut offset = 0;
 
-        if self.user_packet_size == 28 {
-            while offset + 28 <= data.len() {
-                let chunk = &data[offset..offset + 28];
+        if self.user_packet_size == USER_PACKET_SIZE_SMALL {
+            while offset + USER_PACKET_SIZE_SMALL <= data.len() {
+                let chunk = &data[offset..offset + USER_PACKET_SIZE_SMALL];
                 let mut rdr = io::Cursor::new(chunk);
                 let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
                 let privilege = rdr.read_u8()?;
@@ -610,11 +616,11 @@ impl ZK {
                     user_id: user_id.to_string(),
                     card,
                 });
-                offset += 28;
+                offset += USER_PACKET_SIZE_SMALL;
             }
-        } else if self.user_packet_size == 72 {
-            while offset + 72 <= data.len() {
-                let chunk = &data[offset..offset + 72];
+        } else if self.user_packet_size == USER_PACKET_SIZE_LARGE {
+            while offset + USER_PACKET_SIZE_LARGE <= data.len() {
+                let chunk = &data[offset..offset + USER_PACKET_SIZE_LARGE];
                 let mut rdr = io::Cursor::new(chunk);
                 let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
                 let privilege = rdr.read_u8()?;
@@ -645,8 +651,13 @@ impl ZK {
                         .to_string(),
                     card,
                 });
-                offset += 72;
+                offset += USER_PACKET_SIZE_LARGE;
             }
+        } else {
+            return Err(ZKError::Response(format!(
+                "Unsupported user packet size: {}. Device might be using an unknown protocol version.",
+                self.user_packet_size
+            )));
         }
 
         Ok(users)
@@ -678,11 +689,13 @@ impl ZK {
         let mut attendances = Vec::new();
         let mut offset = 0;
 
-        if record_size == 8
-            || (record_size > 0 && total_size.wrapping_rem(8) == 0 && record_size < 16)
+        if record_size == ATT_RECORD_SIZE_8
+            || (record_size > 0
+                && total_size.wrapping_rem(ATT_RECORD_SIZE_8) == 0
+                && record_size < 16)
         {
-            while offset + 8 <= data.len() {
-                let chunk = &data[offset..offset + 8];
+            while offset + ATT_RECORD_SIZE_8 <= data.len() {
+                let chunk = &data[offset..offset + ATT_RECORD_SIZE_8];
                 let mut rdr = io::Cursor::new(chunk);
                 let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
                 let status = rdr.read_u8()?;
@@ -703,11 +716,13 @@ impl ZK {
                 });
                 offset += record_size;
             }
-        } else if record_size == 16
-            || (record_size > 0 && record_size.wrapping_rem(16) == 0 && record_size < 40)
+        } else if record_size == ATT_RECORD_SIZE_16
+            || (record_size > 0
+                && record_size.wrapping_rem(ATT_RECORD_SIZE_16) == 0
+                && record_size < 40)
         {
-            while offset + 16 <= data.len() {
-                let chunk = &data[offset..offset + 16];
+            while offset + ATT_RECORD_SIZE_16 <= data.len() {
+                let chunk = &data[offset..offset + ATT_RECORD_SIZE_16];
                 let mut rdr = io::Cursor::new(chunk);
                 let user_id_num = rdr.read_u32::<byteorder::LittleEndian>()?;
                 let mut time_bytes = [0u8; 4];
@@ -728,11 +743,11 @@ impl ZK {
                     punch,
                     timezone_offset: self.timezone_offset,
                 });
-                offset += 16;
+                offset += ATT_RECORD_SIZE_16;
             }
-        } else if record_size >= 40 {
-            while offset + 40 <= data.len() {
-                let chunk = &data[offset..offset + 40];
+        } else if record_size >= ATT_RECORD_SIZE_40 {
+            while offset + ATT_RECORD_SIZE_40 <= data.len() {
+                let chunk = &data[offset..offset + ATT_RECORD_SIZE_40];
                 // Handle the 0xff255 prefix if present as in Python code
                 let mut chunk_ptr = chunk;
                 if chunk.starts_with(b"\xff255\x00\x00\x00\x00\x00") {
@@ -1154,36 +1169,37 @@ impl ZK {
                     }
 
                     // Decode event data based on length (matching pyzk logic)
-                    let (uid, user_id, status, punch, timestamp) = if data.len() == 10 {
-                        let uid = LittleEndian::read_u16(&data[0..2]) as u32;
-                        let status = data[2];
-                        let punch = data[3];
-                        let timehex = &data[4..10];
-                        let ts = ZK::decode_timehex(timehex).ok()?;
-                        (uid, uid.to_string(), status, punch, ts)
-                    } else if data.len() == 12 {
-                        let user_id_num = LittleEndian::read_u32(&data[0..4]);
-                        let status = data[4];
-                        let punch = data[5];
-                        let timehex = &data[6..12];
-                        let ts = ZK::decode_timehex(timehex).ok()?;
-                        (user_id_num, user_id_num.to_string(), status, punch, ts)
-                    } else if data.len() >= 32 {
-                        // User ID is string (24 bytes)
-                        let user_id = String::from_utf8_lossy(&data[0..24])
-                            .trim_matches('\0')
-                            .to_string();
-                        let status = data[24];
-                        let punch = data[25];
-                        let timehex = &data[26..32];
-                        let ts = ZK::decode_timehex(timehex).ok()?;
-                        (0, user_id, status, punch, ts) // UID might be 0 for string-based IDs
-                    } else {
-                        return Some(Err(ZKError::InvalidData(format!(
-                            "Unknown event data length: {}",
-                            data.len()
-                        ))));
-                    };
+                    let (uid, user_id, status, punch, timestamp) =
+                        if data.len() == EVENT_DATA_LEN_10 {
+                            let uid = LittleEndian::read_u16(&data[0..2]) as u32;
+                            let status = data[2];
+                            let punch = data[3];
+                            let timehex = &data[4..10];
+                            let ts = ZK::decode_timehex(timehex).ok()?;
+                            (uid, uid.to_string(), status, punch, ts)
+                        } else if data.len() == EVENT_DATA_LEN_12 {
+                            let user_id_num = LittleEndian::read_u32(&data[0..4]);
+                            let status = data[4];
+                            let punch = data[5];
+                            let timehex = &data[6..12];
+                            let ts = ZK::decode_timehex(timehex).ok()?;
+                            (user_id_num, user_id_num.to_string(), status, punch, ts)
+                        } else if data.len() >= EVENT_DATA_LEN_32 {
+                            // User ID is string (24 bytes)
+                            let user_id = String::from_utf8_lossy(&data[0..24])
+                                .trim_matches('\0')
+                                .to_string();
+                            let status = data[24];
+                            let punch = data[25];
+                            let timehex = &data[26..32];
+                            let ts = ZK::decode_timehex(timehex).ok()?;
+                            (0, user_id, status, punch, ts) // UID might be 0 for string-based IDs
+                        } else {
+                            return Some(Err(ZKError::InvalidData(format!(
+                                "Unknown event data length: {}",
+                                data.len()
+                            ))));
+                        };
 
                     Some(Ok(Attendance {
                         uid,
@@ -1337,7 +1353,10 @@ impl ZK {
 }
 impl Drop for ZK {
     fn drop(&mut self) {
-        let _ = self.disconnect();
+        // We no longer call self.disconnect() here because it performs blocking network I/O
+        // which can cause hangs during object destruction.
+        // The transport will be closed automatically when it is dropped.
+        self.is_connected = false;
     }
 }
 

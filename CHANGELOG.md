@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.5] - 2026-02-20
+### Added
+- **Protocol Fidelity**: Aligned the checksum logic in `src/protocol.rs` with the `pyzk` reference implementation, ensuring perfect byte-level compatibility across all device firmware versions.
+- **Parsing Robustness**: Introduced structured validation for user packet sizes (28/72 bytes) and added malformed data detection during GBK decoding.
+- **Unified Constants**: Centralized all protocol offsets and record sizes into `src/constants.rs` for improved maintainability and less "magic number" usage.
+
+### Changed
+- **Safety**: Removed blocking network I/O from the `Drop` implementation of the `ZK` struct. This prevents deadlocks and hangs during object destruction in high-concurrency or async environments.
+- **Refactored Logic**: Streamlined attendance and user parsing loops using the newly introduced protocol constants.
+
 ## [0.4.4] - 2026-02-20
 ### Added
 - **High-Performance Caching**: Implemented an internal `user_id_cache` to speed up attendance log processing by mapping UIDs to User IDs locally.
