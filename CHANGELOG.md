@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.1] - 2026-02-19
+## [0.4.0] - 2026-02-20
 ### Added
 - **Device Time Synchronization**: Implemented `set_time` and `encode_time` to allow updating the device's clock.
 - **Lazy Timezone Detection**: Implemented on-demand timezone synchronization (`TZAdj`). The library automatically fetches and caches the device's offset the first time time-related data is accessed, ensuring localization without unnecessary network overhead during connection.
