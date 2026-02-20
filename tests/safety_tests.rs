@@ -36,7 +36,12 @@ fn test_max_discarded_packets_limit() {
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_OPTIONS_RRQ);
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=7\0".to_vec());
+        let res = ZKPacket::new(
+            CMD_ACK_OK,
+            session_id,
+            packet.reply_id,
+            b"TZAdj=7\0".to_vec(),
+        );
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();

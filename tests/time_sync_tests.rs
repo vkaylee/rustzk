@@ -38,8 +38,13 @@ fn test_lazy_timezone_sync_on_get_time() {
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_OPTIONS_RRQ);
-        
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=7\0".to_vec());
+
+        let res = ZKPacket::new(
+            CMD_ACK_OK,
+            session_id,
+            packet.reply_id,
+            b"TZAdj=7\0".to_vec(),
+        );
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -56,7 +61,7 @@ fn test_lazy_timezone_sync_on_get_time() {
         let t: u32 = 839845230; // Encoded time for known date
         let mut payload = Vec::new();
         payload.write_u32::<LittleEndian>(t).unwrap();
-        
+
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, payload);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
@@ -64,7 +69,7 @@ fn test_lazy_timezone_sync_on_get_time() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    
+
     // 1. Connect (should NOT sync timezone yet)
     zk.connect(ZKProtocol::TCP).unwrap();
     assert!(!zk.timezone_synced);
@@ -72,7 +77,7 @@ fn test_lazy_timezone_sync_on_get_time() {
 
     // 2. Call get_time (should trigger lazy sync)
     let time = zk.get_time().unwrap();
-    
+
     // 3. Verify sync happened
     assert!(zk.timezone_synced);
     assert_eq!(zk.timezone_offset, 7 * 60); // 420 minutes
@@ -100,7 +105,9 @@ fn test_lazy_sync_happens_only_once() {
         stream.read_exact(&mut body).unwrap();
         let pkt1 = ZKPacket::from_bytes_owned(body).unwrap();
         let res = ZKPacket::new(CMD_ACK_OK, session_id, pkt1.reply_id, vec![]);
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
 
         // 2. Lazy Sync (First call)
         stream.read_exact(&mut header).unwrap();
@@ -109,9 +116,16 @@ fn test_lazy_sync_happens_only_once() {
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_OPTIONS_RRQ, "Should ask for TZAdj");
-        
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=8\0".to_vec());
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+
+        let res = ZKPacket::new(
+            CMD_ACK_OK,
+            session_id,
+            packet.reply_id,
+            b"TZAdj=8\0".to_vec(),
+        );
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
 
         // 3. CMD_GET_TIME (First call)
         stream.read_exact(&mut header).unwrap();
@@ -120,8 +134,15 @@ fn test_lazy_sync_happens_only_once() {
         stream.read_exact(&mut body).unwrap();
         let pkt3 = ZKPacket::from_bytes_owned(body).unwrap();
         // Respond with OK
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, pkt3.reply_id, 839845230u32.to_le_bytes().to_vec());
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+        let res = ZKPacket::new(
+            CMD_ACK_OK,
+            session_id,
+            pkt3.reply_id,
+            839845230u32.to_le_bytes().to_vec(),
+        );
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
 
         // 4. CMD_GET_TIME (Second call) - Should NOT see another CMD_OPTIONS_RRQ
         stream.read_exact(&mut header).unwrap();
@@ -129,11 +150,21 @@ fn test_lazy_sync_happens_only_once() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_GET_TIME, "Should immediately call GET_TIME, no re-sync");
-        
+        assert_eq!(
+            packet.command, CMD_GET_TIME,
+            "Should immediately call GET_TIME, no re-sync"
+        );
+
         // Respond with OK
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, 839845230u32.to_le_bytes().to_vec());
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+        let res = ZKPacket::new(
+            CMD_ACK_OK,
+            session_id,
+            packet.reply_id,
+            839845230u32.to_le_bytes().to_vec(),
+        );
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
