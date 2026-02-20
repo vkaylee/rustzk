@@ -1003,6 +1003,18 @@ impl ZK {
             Err(ZKError::Response("Failed to delete user".into()))
         }
     }
+
+    /// Helper to find the next available UID on the device.
+    pub fn get_next_free_uid(&mut self) -> ZKResult<u16> {
+        let users = self.get_users()?;
+        let max_uid = users.iter().map(|u| u.uid).max().unwrap_or(0);
+        
+        if max_uid >= 65535 {
+            return Err(ZKError::Response("Device is full (max UID reached)".into()));
+        }
+        
+        Ok(max_uid + 1)
+    }
 }
 
 impl Drop for ZK {

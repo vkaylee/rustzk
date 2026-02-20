@@ -22,21 +22,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut zk = ZK::new(&ip, port);
     zk.connect(ZKProtocol::Auto)?;
 
-    println!(
-        "Connected!
-"
-    );
+    println!("Connected!\n");
 
-    // Detect user packet size by fetching users (required for correct set_user format)
-    println!("Detecting device configuration...");
-    let _ = zk.get_users();
-    println!("User packet size: {} bytes
-", zk.user_packet_size);
+    // 1. Automatically find the next available UID
+    println!("Detecting next available UID...");
+    let next_uid = zk.get_next_free_uid()?;
+    println!("Next available UID: {}\n", next_uid);
 
-    // 1. Create a new user object
+    // 2. Create a new user object using the discovered UID
+    let user_id_str = next_uid.to_string();
     let new_user = User {
-        uid: 65500,                // High UID to avoid collision
-        user_id: "65500".into(),   // Same as UID
+        uid: next_uid,
+        user_id: user_id_str,      // Use same ID as UID for simplicity
         name: "Rust Dev".into(),
         privilege: USER_DEFAULT,
         password: "".into(),
@@ -51,24 +48,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     zk.set_user(&new_user)?;
     println!("User added successfully.");
 
-    // 2. List users to verify
+    // 3. List users to verify
     println!(
         "
 Fetching user list..."
     );
     let users = zk.get_users()?;
-    if let Some(user) = users.iter().find(|u| u.uid == 65500) {
+    if let Some(user) = users.iter().find(|u| u.uid == next_uid) {
         println!("Verified: User found in device list: {}", user.name);
     } else {
         println!("Warning: User not found in list immediately after adding.");
     }
 
-    // 3. Delete the user
+    // 4. Delete the user
     println!(
         "
-Deleting user with UID 65500..."
+Deleting user with UID {}...", next_uid
     );
-    zk.delete_user(65500)?;
+    zk.delete_user(next_uid)?;
     println!("User deleted successfully.");
 
     zk.disconnect()?;
