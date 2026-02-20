@@ -1,18 +1,16 @@
 pub mod constants;
+pub use crate::constants::*;
 pub mod models;
 pub mod protocol;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
-
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
-
 use thiserror::Error;
 
-use crate::constants::*;
 use crate::models::{Attendance, User};
 use crate::protocol::{TCPWrapper, ZKPacket};
 
@@ -48,14 +46,14 @@ pub struct ZK {
     pub session_id: u16,
     pub reply_id: u16,
     pub timeout: Duration,
-    pub user_map: HashMap<String, String>, // Added
+    pub user_map: HashMap<String, String>,
     pub is_connected: bool,
     pub user_packet_size: usize,
-    pub users: u32,   // Changed type
-    pub fingers: u32, // Changed type
-    pub records: u32, // Changed type
+    pub users: u32,
+    pub fingers: u32,
+    pub records: u32,
     pub cards: i32,
-    pub faces: u32, // Changed type
+    pub faces: u32,
     pub fingers_cap: i32,
     pub users_cap: i32,
     pub rec_cap: i32,
@@ -67,7 +65,6 @@ pub struct ZK {
 }
 
 impl ZK {
-    /// Creates a new ZK client instance.
     pub fn new(addr: &str, port: u16) -> Self {
         ZK {
             addr: format!("{}:{}", addr, port),
@@ -631,8 +628,10 @@ impl ZK {
                 let mut name_bytes = [0u8; 24];
                 rdr.read_exact(&mut name_bytes)?;
                 let card = rdr.read_u32::<byteorder::LittleEndian>()?;
-                let mut group_id_bytes = [0u8; 7]; // Wait, let me double check the unpack
+                let _pad1 = rdr.read_u8()?;
+                let mut group_id_bytes = [0u8; 7];
                 rdr.read_exact(&mut group_id_bytes)?;
+                let _pad2 = rdr.read_u8()?;
                 let mut user_id_bytes = [0u8; 24];
                 rdr.read_exact(&mut user_id_bytes)?;
 
@@ -908,6 +907,101 @@ impl ZK {
         }
         self.transport = None;
         Ok(())
+    }
+
+    /// Refreshes the device's internal data.
+    pub fn refresh_data(&mut self) -> ZKResult<()> {
+        let res = self.send_command(CMD_REFRESHDATA, Vec::new())?;
+        if res.command == CMD_ACK_OK {
+            Ok(())
+        } else {
+            Err(ZKError::Response("Failed to refresh data".into()))
+        }
+    }
+
+    /// Creates or updates a user on the device.
+    pub fn set_user(&mut self, user: &User) -> ZKResult<()> {
+        let mut payload = Vec::new();
+
+        if self.user_packet_size == 28 {
+            payload.write_u16::<LittleEndian>(user.uid)?;
+            payload.write_u8(user.privilege)?;
+
+            let mut password_bytes = [0u8; 5];
+            let p_bytes = user.password.as_bytes();
+            let p_len = std::cmp::min(p_bytes.len(), 5);
+            password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
+            payload.write_all(&password_bytes)?;
+
+            let mut name_bytes = [0u8; 8];
+            let n_bytes_gbk = encoding_rs::GBK.encode(&user.name).0;
+            let n_len = std::cmp::min(n_bytes_gbk.len(), 8);
+            name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
+            payload.write_all(&name_bytes)?;
+
+            payload.write_u32::<LittleEndian>(user.card)?;
+            payload.write_u8(0)?; // pad
+            let group_id = user.group_id.parse::<u8>().unwrap_or(0);
+            payload.write_u8(group_id)?;
+            payload.write_u16::<LittleEndian>(0)?; // timezone/pad
+            let user_id_num = user.user_id.parse::<u32>().unwrap_or(0);
+            payload.write_u32::<LittleEndian>(user_id_num)?;
+        } else {
+            // 72-byte format
+            payload.write_u16::<LittleEndian>(user.uid)?;
+            payload.write_u8(user.privilege)?;
+
+            let mut password_bytes = [0u8; 8];
+            let p_bytes = user.password.as_bytes();
+            let p_len = std::cmp::min(p_bytes.len(), 8);
+            password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
+            payload.write_all(&password_bytes)?;
+
+            let mut name_bytes = [0u8; 24];
+            let n_bytes_gbk = encoding_rs::GBK.encode(&user.name).0;
+            let n_len = std::cmp::min(n_bytes_gbk.len(), 24);
+            name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
+            payload.write_all(&name_bytes)?;
+
+            payload.write_u32::<LittleEndian>(user.card)?;
+            payload.write_u8(0)?; // pad1
+
+            let mut group_id_bytes = [0u8; 7];
+            let g_bytes = user.group_id.as_bytes();
+            let g_len = std::cmp::min(g_bytes.len(), 7);
+            group_id_bytes[..g_len].copy_from_slice(&g_bytes[..g_len]);
+            payload.write_all(&group_id_bytes)?;
+
+            payload.write_u8(0)?; // pad2
+
+            let mut user_id_bytes = [0u8; 24];
+            let u_bytes = user.user_id.as_bytes();
+            let u_len = std::cmp::min(u_bytes.len(), 24);
+            user_id_bytes[..u_len].copy_from_slice(&u_bytes[..u_len]);
+            payload.write_all(&user_id_bytes)?;
+        }
+
+        let res = self.send_command(CMD_USER_WRQ, payload)?;
+        if res.command == CMD_ACK_OK {
+            let _ = self.refresh_data();
+            Ok(())
+        } else {
+            Err(ZKError::Response("Failed to set user".into()))
+        }
+    }
+
+    /// Deletes a specific user by UID.
+    pub fn delete_user(&mut self, uid: u16) -> ZKResult<()> {
+        let mut payload = Vec::with_capacity(2);
+        payload.write_u16::<LittleEndian>(uid)?;
+
+        let res = self.send_command(CMD_DELETE_USER, payload)?;
+        if res.command == CMD_ACK_OK {
+            let _ = self.refresh_data();
+            Ok(())
+        } else {
+            Err(ZKError::Response("Failed to delete user".into()))
+        }
     }
 }
 
