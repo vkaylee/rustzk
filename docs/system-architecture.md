@@ -27,5 +27,9 @@
         └───────────────┘
 ```
 
-## Protocol Handling
-The library handles the legacy ZK protocol which uses a fixed 8-byte header followed by a payload and a checksum. For TCP, an additional 8-byte wrapper (Magic + Length) is prepended.
+## Memory Efficiency & Zero-Copy
+The library is designed for high-performance concurrent environments.
+- **Zero-Copy Packets**: `ZKPacket` uses `Cow<'a, [u8]>` to wrap payload data. When reading from the network, packets borrow directly from the read buffer where possible.
+- **In-Place Deserialization**: `read_packet` minimizes allocations by reading headers and bodies into target structures without intermediate copies.
+- **Buffer Pre-allocation**: Chunked data transfers (e.g., thousands of attendance records) use the `_into` pattern to stream data directly into pre-reserved vectors, avoiding repeated `realloc` calls.
+- **Single-Buffer Serialization**: Outgoing packets are wrapped and serialized into a single contiguous buffer to minimize system call overhead.

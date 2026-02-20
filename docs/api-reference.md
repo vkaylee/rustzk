@@ -8,8 +8,13 @@ Creates a new ZK instance.
 ### `pub fn set_password(&mut self, password: u32)`
 Sets the password for authentication. Default is 0.
 
-### `pub fn connect(&mut self, tcp: bool) -> ZKResult<()>`
-Connects to the device using TCP or UDP.
+### `pub fn connect(&mut self, protocol: ZKProtocol) -> ZKResult<()>`
+Connects to the device using the specified protocol.
+
+**`ZKProtocol` Variants:**
+- `TCP`: Force TCP connection.
+- `UDP`: Force UDP connection.
+- `Auto`: Attempt TCP first, fallback to UDP.
 
 ### `pub fn get_attendance(&mut self) -> ZKResult<Vec<Attendance>>`
 Retrieves all attendance logs from the device.

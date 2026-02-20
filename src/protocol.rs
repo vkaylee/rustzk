@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use crate::constants::*;
 use crate::{ZKError, ZKResult};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -36,7 +37,8 @@ pub fn calculate_checksum(data: &[u8]) -> u16 {
 }
 
 /// Represents a ZK protocol packet.
-pub struct ZKPacket {
+#[derive(Debug, Clone)]
+pub struct ZKPacket<'a> {
     /// The command code (e.g., CMD_CONNECT).
     pub command: u16,
     /// The packet checksum.
@@ -46,18 +48,18 @@ pub struct ZKPacket {
     /// The reply ID for tracking request-response pairs.
     pub reply_id: u16,
     /// The raw payload of the command.
-    pub payload: Vec<u8>,
+    pub payload: Cow<'a, [u8]>,
 }
 
-impl ZKPacket {
+impl<'a> ZKPacket<'a> {
     /// Creates a new ZKPacket and automatically calculates the checksum.
-    pub fn new(command: u16, session_id: u16, reply_id: u16, payload: Vec<u8>) -> Self {
+    pub fn new(command: u16, session_id: u16, reply_id: u16, payload: impl Into<Cow<'a, [u8]>>) -> Self {
         let mut packet = ZKPacket {
             command,
             checksum: 0,
             session_id,
             reply_id,
-            payload,
+            payload: payload.into(),
         };
         packet.checksum = packet.calculate_checksum();
         packet
@@ -111,7 +113,7 @@ impl ZKPacket {
         buf.extend_from_slice(&self.payload);
     }
 
-    pub fn from_bytes(data: &[u8]) -> io::Result<Self> {
+    pub fn from_bytes(data: &'a [u8]) -> io::Result<Self> {
         if data.len() < 8 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -123,7 +125,7 @@ impl ZKPacket {
         let checksum = rdr.read_u16::<LittleEndian>()?;
         let session_id = rdr.read_u16::<LittleEndian>()?;
         let reply_id = rdr.read_u16::<LittleEndian>()?;
-        let payload = data[8..].to_vec();
+        let payload = Cow::Borrowed(&data[8..]);
         Ok(ZKPacket {
             command,
             checksum,
@@ -148,7 +150,7 @@ impl ZKPacket {
             checksum,
             session_id,
             reply_id,
-            payload: data,
+            payload: Cow::Owned(data),
         })
     }
 }

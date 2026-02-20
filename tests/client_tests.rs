@@ -27,7 +27,7 @@ fn test_full_device_flow_mock() {
             let (length, _) = TCPWrapper::decode_header(&header).unwrap();
             let mut body = vec![0u8; length];
             stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
             match packet.command {
                 CMD_CONNECT => {
@@ -310,13 +310,13 @@ fn test_tcp_receive_chunk_fragmented() {
         let session_id: u16 = 2222;
 
         // Helper: read one request from client
-        let read_request = |s: &mut TcpStream| -> ZKPacket {
+        let read_request = |s: &mut TcpStream| -> ZKPacket<'static> {
             let mut header = [0u8; 8];
             s.read_exact(&mut header).unwrap();
             let (length, _) = TCPWrapper::decode_header(&header).unwrap();
             let mut body = vec![0u8; length];
             s.read_exact(&mut body).unwrap();
-            ZKPacket::from_bytes(&body).unwrap()
+            ZKPacket::from_bytes_owned(body).unwrap()
         };
 
         // Helper: send response in two fragments (header, then body)
@@ -467,7 +467,7 @@ fn test_get_users_gbk_decoding() {
             let (length, _) = TCPWrapper::decode_header(&header).unwrap();
             let mut body = vec![0u8; length];
             stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
             match packet.command {
                 CMD_CONNECT => {
@@ -599,7 +599,7 @@ fn test_receive_chunk_with_ack_ok() {
             let (length, _) = TCPWrapper::decode_header(&header).unwrap();
             let mut body = vec![0u8; length];
             stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
             match packet.command {
                 CMD_CONNECT => {
@@ -712,7 +712,7 @@ fn test_infinite_loop_protection() {
             let (length, _) = TCPWrapper::decode_header(&header).unwrap();
             let mut body = vec![0u8; length];
             stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
             match packet.command {
                 CMD_CONNECT => {
@@ -813,7 +813,7 @@ fn test_record_count_mismatch_safety() {
             let (length, _) = TCPWrapper::decode_header(&header).unwrap();
             let mut body = vec![0u8; length];
             stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
             match packet.command {
                 CMD_CONNECT => {

@@ -203,7 +203,7 @@ impl ZK {
         }
     }
 
-    fn read_packet(&mut self) -> ZKResult<ZKPacket> {
+    fn read_packet(&mut self) -> ZKResult<ZKPacket<'static>> {
         let transport = self
             .transport
             .as_mut()
@@ -218,21 +218,7 @@ impl ZK {
                 let mut body = vec![0u8; length];
                 stream.read_exact(&mut body)?;
 
-                let mut rdr = io::Cursor::new(&body);
-                let command = rdr.read_u16::<LittleEndian>()?;
-                let checksum = rdr.read_u16::<LittleEndian>()?;
-                let session_id = rdr.read_u16::<LittleEndian>()?;
-                let reply_id = rdr.read_u16::<LittleEndian>()?;
-                let mut payload = body;
-                payload.drain(0..8);
-
-                Ok(ZKPacket {
-                    command,
-                    checksum,
-                    session_id,
-                    reply_id,
-                    payload,
-                })
+                ZKPacket::from_bytes_owned(body)
             }
             ZKTransport::Udp(socket) => {
                 let mut buf = vec![0u8; 2048];
@@ -243,7 +229,7 @@ impl ZK {
         }
     }
 
-    fn read_response_safe(&mut self) -> ZKResult<ZKPacket> {
+    fn read_response_safe(&mut self) -> ZKResult<ZKPacket<'static>> {
         let mut discarded = 0;
         loop {
             let res_packet = self.read_packet()?;
@@ -274,7 +260,11 @@ impl ZK {
         }
     }
 
-    pub(crate) fn send_command(&mut self, command: u16, payload: Vec<u8>) -> ZKResult<ZKPacket> {
+    pub(crate) fn send_command(
+        &mut self,
+        command: u16,
+        payload: Vec<u8>,
+    ) -> ZKResult<ZKPacket<'static>> {
         self.reply_id = self.reply_id.wrapping_add(1);
         if self.reply_id == USHRT_MAX {
             self.reply_id -= USHRT_MAX;
@@ -297,9 +287,10 @@ impl ZK {
         match transport {
             ZKTransport::Tcp(stream) => {
                 let mut buf = Vec::with_capacity(packet.payload.len() + 16);
-                let mut packet_buf = Vec::with_capacity(packet.payload.len() + 8);
-                packet.to_bytes_into(&mut packet_buf);
-                TCPWrapper::wrap_into(&packet_buf, &mut buf);
+                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1).unwrap();
+                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2).unwrap();
+                buf.write_u32::<LittleEndian>((packet.payload.len() + 8) as u32).unwrap();
+                packet.to_bytes_into(&mut buf);
                 stream.write_all(&buf)?;
             }
             ZKTransport::Udp(socket) => {
@@ -395,14 +386,15 @@ impl ZK {
             .ok_or_else(|| ZKError::InvalidData("Invalid date/time".into()))
     }
 
-    fn receive_chunk(&mut self, res: ZKPacket) -> ZKResult<Vec<u8>> {
+    fn receive_chunk_into(&mut self, res: ZKPacket<'static>, data: &mut Vec<u8>) -> ZKResult<()> {
         if res.command == CMD_DATA {
-            Ok(res.payload)
+            data.extend_from_slice(&res.payload);
+            Ok(())
         } else if res.command == CMD_ACK_OK {
             // New firmware may send ACK_OK before actual data.
             // Give the device a little time to prepare.
             std::thread::sleep(std::time::Duration::from_millis(10));
-            Ok(Vec::new())
+            Ok(())
         } else if res.command == CMD_PREPARE_DATA {
             if res.payload.len() < 4 {
                 return Err(ZKError::InvalidData("Invalid prepare data payload".into()));
@@ -416,7 +408,7 @@ impl ZK {
                 )));
             }
 
-            let mut data = Vec::with_capacity(size);
+            data.reserve(size);
             let mut remaining = size;
 
             while remaining > 0 {
@@ -438,7 +430,7 @@ impl ZK {
                     )));
                 }
             }
-            Ok(data)
+            Ok(())
         } else {
             Err(ZKError::Response(format!(
                 "Invalid response for chunk: {}",
@@ -447,8 +439,8 @@ impl ZK {
         }
     }
 
-    fn read_chunk(&mut self, start: i32, size: i32) -> ZKResult<Vec<u8>> {
-        let mut payload = Vec::new();
+    fn read_chunk_into(&mut self, start: i32, size: i32, data: &mut Vec<u8>) -> ZKResult<()> {
+        let mut payload = Vec::with_capacity(8);
         payload.write_i32::<byteorder::LittleEndian>(start)?;
         payload.write_i32::<byteorder::LittleEndian>(size)?;
 
@@ -457,9 +449,9 @@ impl ZK {
             // If we get ACK for read chunk, it means data is coming next.
             // Wait for the actual data packet.
             let data_packet = self.read_response_safe()?;
-            self.receive_chunk(data_packet)
+            self.receive_chunk_into(data_packet, data)
         } else {
-            self.receive_chunk(res)
+            self.receive_chunk_into(res, data)
         }
     }
 
@@ -477,7 +469,7 @@ impl ZK {
 
         let res = self.send_command(_CMD_PREPARE_BUFFER, payload)?;
         if res.command == CMD_DATA {
-            return Ok(res.payload);
+            return Ok(res.payload.into_owned());
         }
 
         // Parse size: prioritize offset 1 (standard) if length >= 5
@@ -513,9 +505,11 @@ impl ZK {
 
         while remaining > 0 {
             let chunk_size = std::cmp::min(remaining, max_chunk);
-            let chunk = self.read_chunk(start as i32, chunk_size as i32)?;
+            let len_before = data.len();
+            self.read_chunk_into(start as i32, chunk_size as i32, &mut data)?;
+            let chunk_len = data.len() - len_before;
 
-            if chunk.is_empty() {
+            if chunk_len == 0 {
                 empty_responses_count += 1;
                 if empty_responses_count > 100 {
                     return Err(ZKError::Response(
@@ -527,10 +521,9 @@ impl ZK {
             }
 
             empty_responses_count = 0; // Reset counter on success
-            data.extend_from_slice(&chunk);
-            start += chunk.len();
-            if remaining >= chunk.len() {
-                remaining -= chunk.len();
+            start += chunk_len;
+            if remaining >= chunk_len {
+                remaining -= chunk_len;
             } else {
                 remaining = 0;
             }

@@ -4,11 +4,11 @@
 - **`src/lib.rs`**: Main entry point, `ZK` client implementation. Now includes robust memory safety checks and improved authentication error handling.
 - **`src/constants.rs`**: ZK Protocol command codes, flags, and safety limits (e.g., `MAX_RESPONSE_SIZE`).
 - **`src/models.rs`**: Domain models (User, Attendance, Finger).
-- **`src/protocol.rs`**: Packet serialization, checksums, and transport wrapping.
+- **`src/protocol.rs`**: Packet serialization, checksums, and transport wrapping. Uses a zero-copy design with `Cow` for memory efficiency.
 
 ## Data Structures
 - `ZK`: Orchestrates connection state and device communication.
-- `ZKPacket`: Internal representation of a protocol packet.
+- `ZKPacket`: Internal representation of a protocol packet. Uses lifetimes and `Cow` to avoid unnecessary payload cloning.
 - `User`: Represents a device user (UID, Name, Privilege, etc.).
 - `Attendance`: Represents a clock-in/out record.
 

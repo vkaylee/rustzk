@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-02-19
+### Added
+- **Zero-Copy Protocol Representation**: Refactored `ZKPacket` to use `std::borrow::Cow` for payloads, allowing zero-copy parsing from buffers.
+- **Buffer-Centric Data Retrieval**: Introduced `read_chunk_into` and `receive_chunk_into` to allow streaming data directly into pre-allocated vectors, drastically reducing allocation overhead for large attendance logs.
+- **Optimized TCP Wrapping**: Streamlined `send_command` to perform single-buffer allocation for wrapped TCP packets.
+
+### Changed
+- Refined `read_packet` to eliminate redundant intermediate allocations during packet body reads.
+- Updated internal data chunking loops to prioritize buffer reuse.
+
+### Fixed
+- Fixed a protocol misalignment in `read_packet` where TCP headers were incorrectly processed as part of the ZK body.
+
 ## [0.3.0] - 2026-02-19
 ### Added
 - Standard `log` crate integration for better observability.
