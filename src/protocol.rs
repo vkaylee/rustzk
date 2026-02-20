@@ -106,16 +106,17 @@ impl<'a> ZKPacket<'a> {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(8 + self.payload.len());
-        self.to_bytes_into(&mut buf);
+        let _ = self.to_bytes_into(&mut buf);
         buf
     }
 
-    pub fn to_bytes_into(&self, buf: &mut Vec<u8>) {
-        buf.write_u16::<LittleEndian>(self.command).unwrap();
-        buf.write_u16::<LittleEndian>(self.checksum).unwrap();
-        buf.write_u16::<LittleEndian>(self.session_id).unwrap();
-        buf.write_u16::<LittleEndian>(self.reply_id).unwrap();
+    pub fn to_bytes_into(&self, buf: &mut Vec<u8>) -> io::Result<()> {
+        buf.write_u16::<LittleEndian>(self.command)?;
+        buf.write_u16::<LittleEndian>(self.checksum)?;
+        buf.write_u16::<LittleEndian>(self.session_id)?;
+        buf.write_u16::<LittleEndian>(self.reply_id)?;
         buf.extend_from_slice(&self.payload);
+        Ok(())
     }
 
     pub fn from_bytes(data: &'a [u8]) -> io::Result<Self> {
@@ -165,17 +166,16 @@ pub struct TCPWrapper;
 impl TCPWrapper {
     pub fn wrap(packet: &[u8]) -> Vec<u8> {
         let mut buf = Vec::with_capacity(8 + packet.len());
-        Self::wrap_into(packet, &mut buf);
+        let _ = Self::wrap_into(packet, &mut buf);
         buf
     }
 
-    pub fn wrap_into(packet: &[u8], buf: &mut Vec<u8>) {
-        buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)
-            .unwrap();
-        buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)
-            .unwrap();
-        buf.write_u32::<LittleEndian>(packet.len() as u32).unwrap();
+    pub fn wrap_into(packet: &[u8], buf: &mut Vec<u8>) -> io::Result<()> {
+        buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
+        buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
+        buf.write_u32::<LittleEndian>(packet.len() as u32)?;
         buf.extend_from_slice(packet);
+        Ok(())
     }
 
     pub fn unwrap(data: &[u8]) -> io::Result<(&[u8], usize)> {

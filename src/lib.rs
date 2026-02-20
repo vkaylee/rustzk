@@ -67,6 +67,7 @@ pub struct ZK {
 }
 
 impl ZK {
+    /// Creates a new ZK client instance.
     pub fn new(addr: &str, port: u16) -> Self {
         ZK {
             addr: format!("{}:{}", addr, port),
@@ -93,10 +94,12 @@ impl ZK {
         }
     }
 
+    /// Sets the communication password for the device.
     pub fn set_password(&mut self, password: u32) {
         self.password = password;
     }
 
+    /// Internal helper to generate the authentication communication key.
     fn make_commkey(key: u32, session_id: u16, ticks: u8) -> Vec<u8> {
         let mut k = 0u32;
         for i in 0..32 {
@@ -124,8 +127,8 @@ impl ZK {
         vec![c1, c2, c3, c4]
     }
 
-    /// Connect to the ZK device.
-    /// `protocol`: ZKProtocol::TCP, ZKProtocol::UDP, or ZKProtocol::Auto (try TCP then UDP)
+    /// Connect to the ZK device using the specified protocol.
+    /// Supports TCP, UDP, or Auto-detection.
     pub fn connect(&mut self, protocol: ZKProtocol) -> ZKResult<()> {
         match protocol {
             ZKProtocol::TCP => self.connect_tcp(),
@@ -205,6 +208,7 @@ impl ZK {
         }
     }
 
+    /// Synchronizes the device's timezone offset (`TZAdj`) lazily.
     fn sync_timezone(&mut self) -> ZKResult<()> {
         if self.timezone_synced {
             return Ok(());
@@ -219,6 +223,7 @@ impl ZK {
         Ok(())
     }
 
+    /// Low-level method to read a single ZK packet from the transport.
     fn read_packet(&mut self) -> ZKResult<ZKPacket<'static>> {
         let transport = self
             .transport
@@ -245,6 +250,7 @@ impl ZK {
         }
     }
 
+    /// Reads a response packet and validates its reply ID.
     fn read_response_safe(&mut self) -> ZKResult<ZKPacket<'static>> {
         let mut discarded = 0;
         loop {
@@ -269,13 +275,11 @@ impl ZK {
                 }
                 continue;
             }
-            // self.reply_id is already set to what we expect.
-            // We don't update it from packet (it should match).
-            // Unless we want to support syncing TO the packet? No, we lead the dance.
             return Ok(res_packet);
         }
     }
 
+    /// Sends a command to the device and waits for a safe response.
     pub(crate) fn send_command(
         &mut self,
         command: u16,
@@ -303,18 +307,15 @@ impl ZK {
         match transport {
             ZKTransport::Tcp(stream) => {
                 let mut buf = Vec::with_capacity(packet.payload.len() + 16);
-                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)
-                    .unwrap();
-                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)
-                    .unwrap();
-                buf.write_u32::<LittleEndian>((packet.payload.len() + 8) as u32)
-                    .unwrap();
-                packet.to_bytes_into(&mut buf);
+                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
+                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
+                buf.write_u32::<LittleEndian>((packet.payload.len() + 8) as u32)?;
+                packet.to_bytes_into(&mut buf)?;
                 stream.write_all(&buf)?;
             }
             ZKTransport::Udp(socket) => {
                 let mut buf = Vec::with_capacity(packet.payload.len() + 8);
-                packet.to_bytes_into(&mut buf);
+                packet.to_bytes_into(&mut buf)?;
                 socket.send(&buf)?;
             }
         }
@@ -322,20 +323,18 @@ impl ZK {
         self.read_response_safe()
     }
 
+    /// Fetches device capacity and usage statistics.
     pub fn read_sizes(&mut self) -> ZKResult<()> {
         let mut res = self.send_command(CMD_GET_FREE_SIZES, Vec::new())?;
 
         // Handle case where device sends ACK_OK then ACK_DATA/Response separately
         if res.command == CMD_ACK_OK && res.payload.len() < 16 {
             // Try reading the next packet which should contain the actual data
-            // We use a short timeout or just read_response_safe which matches reply_id
             match self.read_response_safe() {
                 Ok(next_packet) => {
                     res = next_packet;
                 }
                 Err(e) => {
-                    // If we time out or fail, just proceed with the first packet (which might be empty/error)
-                    // But if it was just a pure ACK, we might want to log it.
                     log::debug!(
                         "read_sizes: received ACK_OK but failed to read subsequent data: {}",
                         e
@@ -563,6 +562,7 @@ impl ZK {
         Ok(data)
     }
 
+    /// Decodes a GBK-encoded byte slice into a String.
     fn decode_gbk(bytes: &[u8]) -> String {
         let trimmed = bytes
             .iter()
@@ -572,6 +572,7 @@ impl ZK {
         cow.into_owned()
     }
 
+    /// Retrieves all users from the device.
     pub fn get_users(&mut self) -> ZKResult<Vec<User>> {
         self.read_sizes()?;
         if self.users == 0 {
@@ -657,6 +658,7 @@ impl ZK {
         Ok(users)
     }
 
+    /// Retrieves all attendance records from the device.
     pub fn get_attendance(&mut self) -> ZKResult<Vec<Attendance>> {
         self.read_sizes()?;
         if self.records == 0 {

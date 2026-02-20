@@ -1,13 +1,20 @@
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 
+/// Represents an attendance record (clock-in/out).
 #[derive(Debug, Clone)]
 pub struct Attendance {
+    /// Internal record UID (sequence number).
     pub uid: u32,
+    /// The user ID string associated with the record.
     pub user_id: String,
+    /// The raw timestamp from the device.
     pub timestamp: NaiveDateTime,
+    /// Attendance status code.
     pub status: u8,
+    /// Punch type (e.g., finger, face, card).
     pub punch: u8,
-    pub timezone_offset: i32, // Offset in minutes (e.g., 420 for UTC+7)
+    /// The timezone offset in minutes applied to this record.
+    pub timezone_offset: i32,
 }
 
 impl Attendance {
@@ -36,36 +43,52 @@ impl Attendance {
     }
 }
 
+/// Represents a user on the ZK device.
 #[derive(Debug, Clone)]
 pub struct User {
+    /// Internal user UID.
     pub uid: u16,
+    /// User's display name.
     pub name: String,
+    /// User's privilege level (Admin, User, etc.).
     pub privilege: u8,
+    /// User's numeric password (if any).
     pub password: String,
+    /// ID of the group the user belongs to.
     pub group_id: String,
+    /// The alphanumeric user ID string.
     pub user_id: String,
+    /// ID of the proximity card assigned to the user.
     pub card: u32,
 }
 
 impl User {
+    /// Returns true if the user is disabled.
     pub fn is_disabled(&self) -> bool {
         (self.privilege & 1) != 0
     }
 
+    /// Returns true if the user is enabled.
     pub fn is_enabled(&self) -> bool {
         !self.is_disabled()
     }
 
+    /// Returns the raw user type bits.
     pub fn user_type(&self) -> u8 {
         self.privilege & 0xE
     }
 }
 
+/// Represents a fingerprint template.
 #[derive(Debug, Clone)]
 pub struct Finger {
+    /// UID of the user this finger belongs to.
     pub uid: u16,
+    /// Finger ID (0-9).
     pub fid: u8,
+    /// Whether the template is valid.
     pub valid: u8,
+    /// The raw binary fingerprint template data.
     pub template: Vec<u8>,
 }
 
