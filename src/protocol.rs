@@ -152,18 +152,25 @@ impl<'a> ZKPacket<'a> {
         if data.len() < 8 {
             return Err(ZKError::InvalidData("Packet too short".into()));
         }
-        let mut rdr = Cursor::new(&data);
-        let command = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
-        let checksum = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
-        let session_id = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
-        let reply_id = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
-        data.drain(0..8);
+        
+        let (command, checksum, session_id, reply_id) = {
+            let mut rdr = Cursor::new(&data);
+            let cmd = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
+            let chk = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
+            let sid = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
+            let rid = rdr.read_u16::<LittleEndian>().map_err(ZKError::from)?;
+            (cmd, chk, sid, rid)
+        };
+        
+        // split_off is more efficient as it doesn't shift the entire vector
+        let payload = data.split_off(8);
+        
         Ok(ZKPacket {
             command,
             checksum,
             session_id,
             reply_id,
-            payload: Cow::Owned(data),
+            payload: Cow::Owned(payload),
         })
     }
 }

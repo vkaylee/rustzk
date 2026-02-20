@@ -530,12 +530,13 @@ impl ZK {
 
             if chunk_len == 0 {
                 empty_responses_count += 1;
-                if empty_responses_count > 100 {
+                if empty_responses_count > 20 {
                     return Err(ZKError::Response(
-                        "Too many empty responses from device".into(),
+                        "Too many empty responses from device during buffer read".into(),
                     ));
                 }
-                // Small delay or just continue to wait for device to prepare data
+                // Give the device time to prepare the next chunk of data
+                std::thread::sleep(std::time::Duration::from_millis(10));
                 continue;
             }
 
