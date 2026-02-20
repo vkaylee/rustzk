@@ -28,6 +28,21 @@ Sets the device time to the specified timestamp.
 ### `pub fn get_users(&mut self) -> ZKResult<Vec<User>>`
 Retrieves all users from the device.
 
+### `pub fn set_user(&mut self, user: &User) -> ZKResult<()>`
+Creates or updates a user on the device. Automatically validates that the User ID is unique across all UIDs to prevent data conflicts.
+
+### `pub fn delete_user(&mut self, uid: u16) -> ZKResult<()>`
+Deletes a specific user from the device by their internal UID.
+
+### `pub fn find_user_by_id(&mut self, user_id: &str) -> ZKResult<Option<User>>`
+Finds a user on the device by their alphanumeric User ID string.
+
+### `pub fn get_next_free_uid(&mut self, start_uid: u16) -> ZKResult<u16>`
+Helper to find the next available internal index (UID) on the device, starting from `start_uid`.
+
+### `pub fn refresh_data(&mut self) -> ZKResult<()>`
+Triggers a data refresh on the device, ensuring all recent modifications (like user additions) are finalized.
+
 ### `pub fn read_sizes(&mut self) -> ZKResult<()>`
 Updates device capacity and usage info.
 

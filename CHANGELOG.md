@@ -3,9 +3,19 @@
 All notable changes to this project will be documented in this file.
 
 ## [0.4.1] - 2026-02-20
+### Added
+- **User Management**: Implemented `set_user`, `delete_user`, and `refresh_data` for full administrative control over device users.
+- **Conflict Protection**: Added automatic validation in `set_user` to prevent duplicate User IDs across different UIDs, ensuring data integrity.
+- **Smart Indexing**: Added `get_next_free_uid` helper to automatically find available internal slots for new users.
+- **Lookup Helpers**: Added `find_user_by_id` to easily retrieve user objects and their internal UIDs using employee IDs.
+- **New User Tests**: Implemented comprehensive integration tests in `tests/user_tests.rs` covering add, update, conflict detection, and deletion flows.
+- **New Management Example**: Added `examples/user_management.rs` demonstrating the complete lifecycle of user administration.
+
 ### Changed
+- **Finalized Lazy Localization**: Refined the on-demand timezone synchronization logic to ensure it only runs once per session and only when time data is accessed.
+- **Re-exported Constants**: Promoted protocol constants to the library root for easier access in user applications.
 - **Safety Hardening**: Replaced potential panic points (`unwrap()`) in protocol serialization with robust `io::Result` error handling.
-- **Documentation**: Added comprehensive doc comments to all public models (`User`, `Attendance`) and core library methods (`connect`, `get_time`, etc.).
+- **Documentation**: Added comprehensive doc comments to all public models (`User`, `Attendance`) and core library methods.
 - **Example Refinement**: Standardized example usage and removed hardcoded fallback IPs for safer testing.
 
 ## [0.4.0] - 2026-02-20

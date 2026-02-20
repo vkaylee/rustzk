@@ -15,8 +15,10 @@
 ## Testing Suite
 - **`tests/client_tests.rs`**: Integration tests using a stateful Mock Server to verify full connection and data retrieval flows.
 - **`tests/parsing_tests.rs`**: Unit tests for decoding raw byte streams into model structures.
+- **`tests/user_tests.rs`**: Comprehensive suite for user administration (add, delete, conflict detection).
 - **`tests/time_sync_tests.rs`**: Specialized tests for verifying lazy timezone synchronization and offset caching logic.
 - **`examples/check_time.rs`**: Practical demonstration of localized time retrieval and drift analysis.
+- **`examples/user_management.rs`**: Demonstration of the complete user administration lifecycle.
 
 ## CI/CD Workflows
 - **`.github/workflows/ci.yml`**: Runs CI checks on every push/PR to master.
