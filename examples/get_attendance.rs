@@ -25,9 +25,6 @@ fn main() {
 
     println!("Connected!\n");
 
-    // Sync timezone and capacity info first
-    let _ = zk.read_sizes();
-
     // Device info
     if let Ok(sn) = zk.get_serial_number() {
         println!("Serial Number : {}", sn);

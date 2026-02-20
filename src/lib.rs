@@ -194,6 +194,7 @@ impl ZK {
 
         if res.command == CMD_ACK_OK {
             self.is_connected = true;
+            let _ = self.sync_timezone();
             Ok(())
         } else {
             Err(ZKError::Connection(format!(
@@ -201,6 +202,15 @@ impl ZK {
                 res.command
             )))
         }
+    }
+
+    fn sync_timezone(&mut self) -> ZKResult<()> {
+        if let Ok(tz_str) = self.get_option_value("TZAdj") {
+            if let Ok(tz_val) = tz_str.parse::<i32>() {
+                self.timezone_offset = tz_val * 60; // Convert hours to minutes
+            }
+        }
+        Ok(())
     }
 
     fn read_packet(&mut self) -> ZKResult<ZKPacket<'static>> {
@@ -351,11 +361,7 @@ impl ZK {
                 self.faces_cap = rdr.read_i32::<byteorder::LittleEndian>()?;
             }
             // Auto-sync timezone
-            if let Ok(tz_str) = self.get_option_value("TZAdj") {
-                if let Ok(tz_val) = tz_str.parse::<i32>() {
-                    self.timezone_offset = tz_val * 60; // Convert hours to minutes
-                }
-            }
+            let _ = self.sync_timezone();
             Ok(())
         } else {
             Err(ZKError::Response(format!(
