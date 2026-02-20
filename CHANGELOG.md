@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.3] - 2026-02-20
+### Added
+- **Real-time Event Monitoring**: Implemented `listen_events()` providing an infinite iterator for live attendance logs. Supports multiple device event formats (10, 12, and 32 bytes).
+- **Fingerprint Management**: Added `get_templates()`, `get_user_template()`, and `delete_user_template()` for full control over biometric data.
+- **Device Configuration**: Implemented `set_option()` and `change_password()` to allow remote device management and security updates.
+- **Robust Mock Testing**: Added specialized integration tests for live events and biometric data handling with stateful mock servers.
+- **New Examples**: Added `examples/live_events.rs` and `examples/fingerprint_management.rs` for practical implementation reference.
+
 ## [0.4.2] - 2026-02-20
 ### Added
 - **API Encapsulation**: Refined visibility of internal structures and methods. `ZKPacket`, `TCPWrapper`, and many internal helper methods are now private or `pub(crate)` to provide a cleaner public API.

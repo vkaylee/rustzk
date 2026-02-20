@@ -16,9 +16,13 @@
 - **`tests/client_tests.rs`**: Integration tests using a stateful Mock Server to verify full connection and data retrieval flows.
 - **`tests/parsing_tests.rs`**: Unit tests for decoding raw byte streams into model structures.
 - **`tests/user_tests.rs`**: Comprehensive suite for user administration (add, delete, conflict detection).
+- **`tests/fingerprint_tests.rs`**: Verification of biometric data retrieval and deletion logic.
+- **`tests/live_event_tests.rs`**: Integration tests for real-time monitoring across various data formats.
 - **`tests/time_sync_tests.rs`**: Specialized tests for verifying lazy timezone synchronization and offset caching logic.
 - **`examples/check_time.rs`**: Practical demonstration of localized time retrieval and drift analysis.
 - **`examples/user_management.rs`**: Demonstration of the complete user administration lifecycle.
+- **`examples/fingerprint_management.rs`**: Practical guide to handling biometric templates.
+- **`examples/live_events.rs`**: Real-time event monitoring implementation guide.
 
 ## CI/CD Workflows
 - **`.github/workflows/ci.yml`**: Runs CI checks on every push/PR to master.

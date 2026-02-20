@@ -20,7 +20,22 @@ Connects to the device using the specified protocol.
 - `Auto`: Attempt TCP first, fallback to UDP.
 
 ### `pub fn get_attendance(&mut self) -> ZKResult<Vec<Attendance>>`
-Retrieves all attendance logs from the device.
+Retrieves all historical attendance logs from the device.
+
+### `pub fn listen_events(&mut self) -> ZKResult<impl Iterator<Item = ZKResult<Attendance>> + '_>`
+Registers for real-time attendance events and returns an iterator that yields logs as they happen. This is a blocking operation when iterating.
+
+### `pub fn get_templates(&mut self) -> ZKResult<Vec<Finger>>`
+Retrieves all fingerprint templates currently stored on the device.
+
+### `pub fn get_user_template(&mut self, uid: u16, fid: u8) -> ZKResult<Option<Finger>>`
+Retrieves a specific fingerprint template for a given user (UID) and finger index (FID).
+
+### `pub fn delete_user_template(&mut self, uid: u16, fid: u8) -> ZKResult<()>`
+Deletes a specific fingerprint template from the device.
+
+### `pub fn set_option(&mut self, key: &str, value: &str) -> ZKResult<()>`
+Sets a system option on the device (e.g., `DeviceName`).
 
 ### `pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>>`
 Retrieves the current device time. **Note:** On the first call, this method automatically fetches and caches the device's timezone offset (`TZAdj`) to provide localized results.
