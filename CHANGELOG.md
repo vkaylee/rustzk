@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] - 2026-02-20
+### Added
+- **API Encapsulation**: Refined visibility of internal structures and methods. `ZKPacket`, `TCPWrapper`, and many internal helper methods are now private or `pub(crate)` to provide a cleaner public API.
+- **Public Getters**: Added public getter methods for essential fields like `timezone_offset()` and `timezone_synced()`.
+- **User Management Helpers**: Integrated `find_user_by_id` and `get_next_free_uid` into the stable API.
+
+### Changed
+- **Code Cleanup**: Removed unused fields and imports to comply with strict linting rules.
+- **Improved Stability**: All 40+ unit and integration tests updated to align with the new encapsulated API.
+
 ## [0.4.1] - 2026-02-20
 ### Added
 - **User Management**: Implemented `set_user`, `delete_user`, and `refresh_data` for full administrative control over device users.
