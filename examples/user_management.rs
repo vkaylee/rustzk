@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let user_id_str = next_uid.to_string();
     let new_user = User {
         uid: next_uid,
-        user_id: user_id_str,      // Use same ID as UID for simplicity
+        user_id: user_id_str.clone(), // Use same ID as UID for simplicity
         name: "Rust Dev".into(),
         privilege: USER_DEFAULT,
         password: "".into(),
@@ -49,10 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("User added successfully.");
 
     // 3. List users to verify
-    println!(
-        "
-Fetching user list..."
-    );
+    println!("\nFetching user list...");
     let users = zk.get_users()?;
     if let Some(user) = users.iter().find(|u| u.uid == next_uid) {
         println!("Verified: User found in device list: {}", user.name);
@@ -60,11 +57,17 @@ Fetching user list..."
         println!("Warning: User not found in list immediately after adding.");
     }
 
-    // 4. Delete the user
-    println!(
-        "
-Deleting user with UID {}...", next_uid
-    );
+    // 4. Update user by ID
+    println!("\nDemonstrating Update by ID: {}", user_id_str);
+    if let Some(mut user) = zk.find_user_by_id(&user_id_str)? {
+        println!("Found User with UID: {}. Updating name...", user.uid);
+        user.name = "Updated Rust Dev".into();
+        zk.set_user(&user)?;
+        println!("User updated successfully.");
+    }
+
+    // 5. Delete the user
+    println!("\nDeleting user with UID {}...", next_uid);
     zk.delete_user(next_uid)?;
     println!("User deleted successfully.");
 

@@ -1004,20 +1004,25 @@ impl ZK {
         }
     }
 
-    /// Helper to find the next available UID on the device.
-    pub fn get_next_free_uid(&mut self) -> ZKResult<u16> {
-        let users = self.get_users()?;
-        let max_uid = users.iter().map(|u| u.uid).max().unwrap_or(0);
-        
-        if max_uid >= 65535 {
-            return Err(ZKError::Response("Device is full (max UID reached)".into()));
+        /// Helper to find the next available UID on the device.
+        pub fn get_next_free_uid(&mut self) -> ZKResult<u16> {
+            let users = self.get_users()?;
+            let max_uid = users.iter().map(|u| u.uid).max().unwrap_or(0);
+    
+            if max_uid >= 65535 {
+                return Err(ZKError::Response("Device is full (max UID reached)".into()));
+            }
+    
+            Ok(max_uid + 1)
         }
-        
-        Ok(max_uid + 1)
+    
+        /// Finds a user on the device by their alphanumeric User ID.
+        pub fn find_user_by_id(&mut self, user_id: &str) -> ZKResult<Option<User>> {
+            let users = self.get_users()?;
+            Ok(users.into_iter().find(|u| u.user_id == user_id))
+        }
     }
-}
-
-impl Drop for ZK {
+    impl Drop for ZK {
     fn drop(&mut self) {
         let _ = self.disconnect();
     }
