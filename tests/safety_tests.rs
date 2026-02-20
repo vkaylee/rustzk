@@ -29,7 +29,7 @@ fn test_max_discarded_packets_limit() {
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
 
-        // 1.5 Handle TZAdj Sync (Automated)
+        // 2. Handle CMD_GET_TIME (Client will trigger automated TZAdj sync first)
         stream.read_exact(&mut header).unwrap();
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
@@ -41,7 +41,7 @@ fn test_max_discarded_packets_limit() {
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
 
-        // 2. Handle CMD_GET_TIME
+        // 3. Handle the actual CMD_GET_TIME
         stream.read_exact(&mut header).unwrap();
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];

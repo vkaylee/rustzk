@@ -20,7 +20,7 @@ Connects to the device using the specified protocol.
 Retrieves all attendance logs from the device.
 
 ### `pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>>`
-Retrieves the current device time, adjusted for the detected timezone.
+Retrieves the current device time. **Note:** On the first call, this method automatically fetches and caches the device's timezone offset (`TZAdj`) to provide localized results.
 
 ### `pub fn set_time(&mut self, t: DateTime<FixedOffset>) -> ZKResult<()>`
 Sets the device time to the specified timestamp.

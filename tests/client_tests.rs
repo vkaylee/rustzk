@@ -219,7 +219,7 @@ fn test_tcp_partial_response_fragmented() {
         stream.write_all(&wrapped[8..]).unwrap();
         stream.flush().unwrap();
 
-        // Handle the automated TZAdj sync from connect()
+        // Now handle CMD_GET_TIME — Client will now automatically trigger sync_timezone here
         let mut header_tz = [0u8; 8];
         stream.read_exact(&mut header_tz).unwrap();
         let (length_tz, _) = TCPWrapper::decode_header(&header_tz).unwrap();
@@ -232,7 +232,7 @@ fn test_tcp_partial_response_fragmented() {
             .write_all(&TCPWrapper::wrap(&res_tz.to_bytes()))
             .unwrap();
 
-        // Now handle CMD_GET_TIME — send it as one tiny write per byte
+        // NOW handle the actual CMD_GET_TIME — send it as one tiny write per byte
         let mut header2 = [0u8; 8];
         stream.read_exact(&mut header2).unwrap();
         let (length2, _) = TCPWrapper::decode_header(&header2).unwrap();

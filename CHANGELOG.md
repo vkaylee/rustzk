@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [0.3.1] - 2026-02-19
 ### Added
 - **Device Time Synchronization**: Implemented `set_time` and `encode_time` to allow updating the device's clock.
-- **Automated Timezone Detection**: Enhanced `read_sizes` to automatically fetch and apply the device's timezone offset (`TZAdj`).
+- **Lazy Timezone Detection**: Implemented on-demand timezone synchronization (`TZAdj`). The library automatically fetches and caches the device's offset the first time time-related data is accessed, ensuring localization without unnecessary network overhead during connection.
+- **New Time Checker Example**: Added `examples/check_time.rs` to demonstrate standalone time retrieval and drift detection.
+- **Test Suite Modernization**: Updated all mock servers to handle the new automated handshake and standardized on `from_bytes_owned` for high-performance packet parsing.
 - **Zero-Copy Protocol Representation**: Refactored `ZKPacket` to use `std::borrow::Cow` for payloads, allowing zero-copy parsing from buffers.
 - **Buffer-Centric Data Retrieval**: Introduced `read_chunk_into` and `receive_chunk_into` to allow streaming data directly into pre-allocated vectors, drastically reducing allocation overhead for large attendance logs.
 - **Optimized TCP Wrapping**: Streamlined `send_command` to perform single-buffer allocation for wrapped TCP packets.

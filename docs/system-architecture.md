@@ -33,3 +33,4 @@ The library is designed for high-performance concurrent environments.
 - **In-Place Deserialization**: `read_packet` minimizes allocations by reading headers and bodies into target structures without intermediate copies.
 - **Buffer Pre-allocation**: Chunked data transfers (e.g., thousands of attendance records) use the `_into` pattern to stream data directly into pre-reserved vectors, avoiding repeated `realloc` calls.
 - **Single-Buffer Serialization**: Outgoing packets are wrapped and serialized into a single contiguous buffer to minimize system call overhead.
+- **Lazy Localization**: Timezone synchronization (`TZAdj`) is performed on-demand. The library caches the offset after the first time-related call (`get_time` or `get_attendance`) to ensure future calls are fast and localized without taxing the initial connection process.

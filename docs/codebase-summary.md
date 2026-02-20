@@ -15,6 +15,7 @@
 ## Testing Suite
 - **`tests/client_tests.rs`**: Integration tests using a stateful Mock Server to verify full connection and data retrieval flows.
 - **`tests/parsing_tests.rs`**: Unit tests for decoding raw byte streams into model structures.
+- **`examples/check_time.rs`**: Practical demonstration of localized time retrieval and drift analysis.
 
 ## CI/CD Workflows
 - **`.github/workflows/ci.yml`**: Runs CI checks on every push/PR to master.

@@ -32,7 +32,7 @@ fn test_request_response_misalignment_tcp() {
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
 
-        // 1.5 Handle TZAdj Sync (Automated)
+        // 2. Handle CMD_GET_TIME (Client will trigger automated TZAdj sync first)
         stream.read_exact(&mut header).unwrap();
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
@@ -44,7 +44,7 @@ fn test_request_response_misalignment_tcp() {
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
 
-        // 2. Handle CMD_GET_TIME
+        // 3. Handle the actual CMD_GET_TIME
         stream.read_exact(&mut header).unwrap();
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
@@ -105,18 +105,6 @@ fn test_receive_chunk_misalignment_tcp() {
         assert_eq!(packet.command, CMD_CONNECT);
 
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-        stream
-            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-            .unwrap();
-
-        // 1.5 Handle TZAdj Sync (from connect)
-        stream.read_exact(&mut header).unwrap();
-        let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-        let mut body = vec![0u8; length];
-        stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=7\0".to_vec());
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();

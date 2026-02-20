@@ -63,6 +63,7 @@ pub struct ZK {
     pub encoding: String,
     pub password: u32,
     pub timezone_offset: i32, // Offset in minutes
+    pub timezone_synced: bool,
 }
 
 impl ZK {
@@ -88,6 +89,7 @@ impl ZK {
             encoding: "UTF-8".to_string(),
             password: 0,
             timezone_offset: 0,
+            timezone_synced: false,
         }
     }
 
@@ -189,13 +191,11 @@ impl ZK {
             }
             self.session_id = auth_res.session_id;
             self.is_connected = true;
-            let _ = self.sync_timezone();
             return Ok(());
         }
 
         if res.command == CMD_ACK_OK {
             self.is_connected = true;
-            let _ = self.sync_timezone();
             Ok(())
         } else {
             Err(ZKError::Connection(format!(
@@ -206,9 +206,14 @@ impl ZK {
     }
 
     fn sync_timezone(&mut self) -> ZKResult<()> {
+        if self.timezone_synced {
+            return Ok(());
+        }
+
         if let Ok(tz_str) = self.get_option_value("TZAdj") {
             if let Ok(tz_val) = tz_str.parse::<i32>() {
                 self.timezone_offset = tz_val * 60; // Convert hours to minutes
+                self.timezone_synced = true;
             }
         }
         Ok(())
@@ -836,6 +841,7 @@ impl ZK {
     }
 
     pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>> {
+        let _ = self.sync_timezone();
         let res = self.send_command(CMD_GET_TIME, Vec::new())?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
             let naive = ZK::decode_time(&res.payload)?;
