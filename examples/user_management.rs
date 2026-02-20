@@ -1,5 +1,5 @@
 use rustzk::models::User;
-use rustzk::{ZKProtocol, ZK, USER_DEFAULT};
+use rustzk::{ZKProtocol, USER_DEFAULT, ZK};
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

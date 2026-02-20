@@ -479,12 +479,7 @@ impl ZK {
         }
     }
 
-    fn read_with_buffer(
-        &mut self,
-        command: u16,
-        fct: u8,
-        ext: u32,
-    ) -> ZKResult<Vec<u8>> {
+    fn read_with_buffer(&mut self, command: u16, fct: u8, ext: u32) -> ZKResult<Vec<u8>> {
         let mut payload = Vec::new();
         payload.write_u8(1)?; // ZK6/8 flag?
         payload.write_u16::<byteorder::LittleEndian>(command)?;
@@ -1089,7 +1084,7 @@ impl ZK {
             if res.command == CMD_DATA {
                 let mut template = res.payload.into_owned();
                 // Strip trailing nulls if present (common firmware quirk)
-                while template.ends_with(&[0]) && template.len() > 0 {
+                while template.ends_with(&[0]) && !template.is_empty() {
                     template.pop();
                 }
                 return Ok(Some(Finger {
@@ -1127,7 +1122,10 @@ impl ZK {
         if res.command == CMD_ACK_OK {
             Ok(())
         } else {
-            Err(ZKError::Response(format!("Failed to register events with flags {}", flags)))
+            Err(ZKError::Response(format!(
+                "Failed to register events with flags {}",
+                flags
+            )))
         }
     }
 
@@ -1144,7 +1142,10 @@ impl ZK {
                     let _ = self.send_ack_ok();
 
                     if packet.command != CMD_REG_EVENT {
-                        return Some(Err(ZKError::Response(format!("Unexpected command during event listening: {}", packet.command))));
+                        return Some(Err(ZKError::Response(format!(
+                            "Unexpected command during event listening: {}",
+                            packet.command
+                        ))));
                     }
 
                     let data = &packet.payload;
@@ -1169,14 +1170,19 @@ impl ZK {
                         (user_id_num, user_id_num.to_string(), status, punch, ts)
                     } else if data.len() >= 32 {
                         // User ID is string (24 bytes)
-                        let user_id = String::from_utf8_lossy(&data[0..24]).trim_matches('\0').to_string();
+                        let user_id = String::from_utf8_lossy(&data[0..24])
+                            .trim_matches('\0')
+                            .to_string();
                         let status = data[24];
                         let punch = data[25];
                         let timehex = &data[26..32];
                         let ts = ZK::decode_timehex(timehex).ok()?;
                         (0, user_id, status, punch, ts) // UID might be 0 for string-based IDs
                     } else {
-                        return Some(Err(ZKError::InvalidData(format!("Unknown event data length: {}", data.len()))));
+                        return Some(Err(ZKError::InvalidData(format!(
+                            "Unknown event data length: {}",
+                            data.len()
+                        ))));
                     };
 
                     Some(Ok(Attendance {
@@ -1188,7 +1194,10 @@ impl ZK {
                         timezone_offset: self.timezone_offset,
                     }))
                 }
-                Err(ZKError::Network(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                Err(ZKError::Network(ref e))
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
                     // This is expected during idle listening
                     None
                 }
@@ -1199,9 +1208,12 @@ impl ZK {
 
     /// Internal helper to send a simple ACK_OK response.
     fn send_ack_ok(&mut self) -> ZKResult<()> {
-        let transport = self.transport.as_mut().ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+        let transport = self
+            .transport
+            .as_mut()
+            .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
         let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, Vec::new());
-        
+
         match transport {
             ZKTransport::Tcp(stream) => {
                 let mut buf = Vec::with_capacity(16);
@@ -1237,71 +1249,93 @@ impl ZK {
             .ok_or_else(|| ZKError::InvalidData("Invalid date/time in hex".into()))
     }
 
-            /// Helper to find the next available UID on the device.
-            /// `start_uid`: The UID to start searching from (useful for testing in high ranges).
-            pub fn get_next_free_uid(&mut self, start_uid: u16) -> ZKResult<u16> {
-                let users = self.get_users()?;
-                let used_uids: std::collections::HashSet<u16> = users.iter().map(|u| u.uid).collect();
-                
-                for uid in start_uid..=65535 {
-                    if !used_uids.contains(&uid) {
-                        return Ok(uid);
-                    }
-                }
-                
-                Err(ZKError::Response("No free UID found in the specified range".into()))
+    /// Helper to find the next available UID on the device.
+    /// `start_uid`: The UID to start searching from (useful for testing in high ranges).
+    pub fn get_next_free_uid(&mut self, start_uid: u16) -> ZKResult<u16> {
+        let users = self.get_users()?;
+        let used_uids: std::collections::HashSet<u16> = users.iter().map(|u| u.uid).collect();
+
+        for uid in start_uid..=65535 {
+            if !used_uids.contains(&uid) {
+                return Ok(uid);
             }
-                /// Finds a user on the device by their alphanumeric User ID.
-        pub fn find_user_by_id(&mut self, user_id: &str) -> ZKResult<Option<User>> {
-            let users = self.get_users()?;
-            Ok(users.into_iter().find(|u| u.user_id == user_id))
         }
 
-        /// Returns the detected timezone offset in minutes.
-        pub fn timezone_offset(&self) -> i32 {
-            self.timezone_offset
+        Err(ZKError::Response(
+            "No free UID found in the specified range".into(),
+        ))
+    }
+    /// Finds a user on the device by their alphanumeric User ID.
+    pub fn find_user_by_id(&mut self, user_id: &str) -> ZKResult<Option<User>> {
+        let users = self.get_users()?;
+        Ok(users.into_iter().find(|u| u.user_id == user_id))
+    }
+
+    /// Returns the detected timezone offset in minutes.
+    pub fn timezone_offset(&self) -> i32 {
+        self.timezone_offset
+    }
+
+    /// Returns true if the timezone has been synchronized with the device.
+    pub fn timezone_synced(&self) -> bool {
+        self.timezone_synced
+    }
+
+    /// Explicitly refreshes the internal user ID cache.
+    pub fn refresh_user_cache(&mut self) -> ZKResult<()> {
+        let users = self.get_users()?;
+        let mut cache = HashMap::with_capacity(users.len());
+        for user in users {
+            cache.insert(user.uid, user.user_id);
+        }
+        self.user_id_cache = Some(cache);
+        Ok(())
+    }
+
+    /// Internal helper to get User ID for a UID, using cache if available.
+    fn get_user_id_from_cache(&mut self, uid: u16) -> String {
+        if self.user_id_cache.is_none() {
+            let _ = self.refresh_user_cache();
         }
 
-        /// Returns true if the timezone has been synchronized with the device.
-            pub fn timezone_synced(&self) -> bool {
-                self.timezone_synced
-            }
-        
-            /// Explicitly refreshes the internal user ID cache.
-            pub fn refresh_user_cache(&mut self) -> ZKResult<()> {
-                let users = self.get_users()?;
-                let mut cache = HashMap::with_capacity(users.len());
-                for user in users {
-                    cache.insert(user.uid, user.user_id);
-                }
-                self.user_id_cache = Some(cache);
-                Ok(())
-            }
-        
-            /// Internal helper to get User ID for a UID, using cache if available.
-            fn get_user_id_from_cache(&mut self, uid: u16) -> String {
-                if self.user_id_cache.is_none() {
-                    let _ = self.refresh_user_cache();
-                }
-                
-                self.user_id_cache
-                    .as_ref()
-                    .and_then(|c| c.get(&uid).cloned())
-                    .unwrap_or_else(|| uid.to_string())
-            }
-        
-            pub fn users(&self) -> u32 { self.users }
-            pub fn users_cap(&self) -> i32 { self.users_cap }
-            pub fn fingers(&self) -> u32 { self.fingers }
-            pub fn fingers_cap(&self) -> i32 { self.fingers_cap }
-            pub fn records(&self) -> u32 { self.records }
-            pub fn records_cap(&self) -> i32 { self.rec_cap }
-            pub fn faces(&self) -> u32 { self.faces }
-                pub fn faces_cap(&self) -> i32 { self.faces_cap }
-                pub fn cards(&self) -> i32 { self.cards }
-                pub fn user_packet_size(&self) -> usize { self.user_packet_size }
-            }
-                impl Drop for ZK {
+        self.user_id_cache
+            .as_ref()
+            .and_then(|c| c.get(&uid).cloned())
+            .unwrap_or_else(|| uid.to_string())
+    }
+
+    pub fn users(&self) -> u32 {
+        self.users
+    }
+    pub fn users_cap(&self) -> i32 {
+        self.users_cap
+    }
+    pub fn fingers(&self) -> u32 {
+        self.fingers
+    }
+    pub fn fingers_cap(&self) -> i32 {
+        self.fingers_cap
+    }
+    pub fn records(&self) -> u32 {
+        self.records
+    }
+    pub fn records_cap(&self) -> i32 {
+        self.rec_cap
+    }
+    pub fn faces(&self) -> u32 {
+        self.faces
+    }
+    pub fn faces_cap(&self) -> i32 {
+        self.faces_cap
+    }
+    pub fn cards(&self) -> i32 {
+        self.cards
+    }
+    pub fn user_packet_size(&self) -> usize {
+        self.user_packet_size
+    }
+}
+impl Drop for ZK {
     fn drop(&mut self) {
         let _ = self.disconnect();
     }

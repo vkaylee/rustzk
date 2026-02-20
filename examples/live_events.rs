@@ -23,8 +23,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     zk.timeout = std::time::Duration::from_secs(5);
     zk.connect(ZKProtocol::Auto)?;
 
-    println!("Connected! Monitoring events... (Press Ctrl+C to stop)
-");
+    println!(
+        "Connected! Monitoring events... (Press Ctrl+C to stop)
+"
+    );
 
     // Start listening for events
     let event_iter = zk.listen_events()?;

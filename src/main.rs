@@ -49,7 +49,11 @@ fn main() {
     if zk.read_sizes().is_ok() {
         println!("Users: {} / {}", zk.users(), zk.users_cap());
         println!("Fingers: {} / {}", zk.fingers(), zk.fingers_cap());
-        println!("Attendance Records: {} / {}", zk.records(), zk.records_cap());
+        println!(
+            "Attendance Records: {} / {}",
+            zk.records(),
+            zk.records_cap()
+        );
         if zk.faces_cap() > 0 {
             println!("Faces: {} / {}", zk.faces(), zk.faces_cap());
         }
