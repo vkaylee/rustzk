@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [0.4.2] - 2026-02-20
 ### Added
 - **API Encapsulation**: Refined visibility of internal structures and methods. `ZKPacket`, `TCPWrapper`, and many internal helper methods are now private or `pub(crate)` to provide a cleaner public API.
-- **Password Authentication**: Solidified CommKey authentication support. Users can now securely connect to password-protected devices using `set_password(u32)`.
+- **Password Authentication**: Solidified CommKey authentication support. Users can connect to protected devices using `set_password(u32)` and update the device's password using the new `change_password(u32)` method.
 - **Public Getters**: Added public getter methods for essential fields like `timezone_offset()` and `timezone_synced()`.
 - **User Management Helpers**: Integrated `find_user_by_id` and `get_next_free_uid` into the stable API.
 

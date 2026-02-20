@@ -870,6 +870,25 @@ impl ZK {
         }
     }
 
+    /// Sets a device option by key and value.
+    pub fn set_option(&mut self, key: &str, value: &str) -> ZKResult<()> {
+        let command_string = format!("{}={}\0", key, value);
+        let res = self.send_command(CMD_OPTIONS_WRQ, command_string.into_bytes())?;
+        if res.command == CMD_ACK_OK {
+            Ok(())
+        } else {
+            Err(ZKError::Response(format!("Failed to set option {}", key)))
+        }
+    }
+
+    /// Changes the communication password (CommKey) of the device.
+    /// Note: After changing the password, you must use the new password for future connections.
+    pub fn change_password(&mut self, new_password: u32) -> ZKResult<()> {
+        self.set_option("ComKey", &new_password.to_string())?;
+        self.password = new_password; // Update local state to match
+        Ok(())
+    }
+
     pub fn restart(&mut self) -> ZKResult<()> {
         self.send_command(CMD_RESTART, Vec::new())?;
         self.is_connected = false;

@@ -141,3 +141,56 @@ fn test_connect_with_password_mock() {
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
 }
+
+#[test]
+fn test_change_password_mock() {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    let server_handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let session_id = 1234;
+
+        loop {
+            let mut header = [0u8; 8];
+            if stream.read_exact(&mut header).is_err() { break; }
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            stream.read_exact(&mut body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
+
+            match packet.command {
+                CMD_CONNECT => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                }
+                CMD_OPTIONS_WRQ => {
+                    let payload = String::from_utf8_lossy(&packet.payload);
+                    assert!(payload.contains("ComKey=654321"));
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                }
+                CMD_EXIT => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    break;
+                }
+                _ => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                }
+            }
+        }
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+
+    let result = zk.change_password(654321);
+    assert!(result.is_ok());
+
+    zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}
