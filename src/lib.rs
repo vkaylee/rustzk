@@ -920,7 +920,20 @@ impl ZK {
     }
 
     /// Creates or updates a user on the device.
+    /// Ensures User ID uniqueness to prevent logic conflicts.
     pub fn set_user(&mut self, user: &User) -> ZKResult<()> {
+        // 1. Safety Check: Ensure this User ID doesn't already exist under a DIFFERENT UID.
+        // If it exists under the SAME UID, it's an update, which is allowed.
+        let existing_users = self.get_users()?;
+        if let Some(existing) = existing_users.iter().find(|u| u.user_id == user.user_id) {
+            if existing.uid != user.uid {
+                return Err(ZKError::Response(format!(
+                    "Conflict: User ID '{}' already exists on the device at UID {}",
+                    user.user_id, existing.uid
+                )));
+            }
+        }
+
         let mut payload = Vec::new();
 
         if self.user_packet_size == 28 {
