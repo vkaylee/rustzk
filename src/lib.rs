@@ -189,6 +189,7 @@ impl ZK {
             }
             self.session_id = auth_res.session_id;
             self.is_connected = true;
+            let _ = self.sync_timezone();
             return Ok(());
         }
 

@@ -24,7 +24,7 @@ fn test_request_response_misalignment_tcp() {
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_CONNECT);
 
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
@@ -32,23 +32,31 @@ fn test_request_response_misalignment_tcp() {
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
 
-        // 2. Handle CMD_GET_TIME - Client expects reply_id = 0 (since it wraps or starts at USHRT_MAX-1)
-        // Wait, ZK::new sets reply_id = USHRT_MAX - 1.
-        // connect increments it to 0.
-        // get_time increments it to 1.
-
+        // 1.5 Handle TZAdj Sync (Automated)
         stream.read_exact(&mut header).unwrap();
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
+        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=7\0".to_vec());
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
+
+        // 2. Handle CMD_GET_TIME
+        stream.read_exact(&mut header).unwrap();
+        let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+        let mut body = vec![0u8; length];
+        stream.read_exact(&mut body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         let expected_reply_id = packet.reply_id;
 
         // MOCK MISALIGNMENT: Send a STALE packet first with an old reply_id
         let stale_res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            expected_reply_id - 1,
+            expected_reply_id.wrapping_sub(1),
             vec![b'S', b'T', b'A', b'L', b'E'],
         );
         stream
@@ -93,10 +101,22 @@ fn test_receive_chunk_misalignment_tcp() {
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_CONNECT);
 
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
+
+        // 1.5 Handle TZAdj Sync (from connect)
+        stream.read_exact(&mut header).unwrap();
+        let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+        let mut body = vec![0u8; length];
+        stream.read_exact(&mut body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
+        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=7\0".to_vec());
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -106,7 +126,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_GET_FREE_SIZES);
 
         let mut sizes_payload = vec![0u8; 92];
@@ -117,20 +137,14 @@ fn test_receive_chunk_misalignment_tcp() {
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
 
-        // 3. Handle CMD_OPTIONS_RRQ (for read_sizes which is called by get_users)
+        // 2.5 Handle TZAdj Sync (from read_sizes)
         stream.read_exact(&mut header).unwrap();
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_OPTIONS_RRQ);
-
-        let res = ZKPacket::new(
-            CMD_ACK_OK,
-            session_id,
-            packet.reply_id,
-            b"UserCount=1\0".to_vec(),
-        );
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=7\0".to_vec());
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -140,7 +154,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, _CMD_PREPARE_BUFFER);
 
         // Send CMD_PREPARE_DATA with size 28 (one user)
@@ -161,7 +175,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, _CMD_READ_BUFFER);
 
         // Send CMD_PREPARE_DATA for the chunk
@@ -213,7 +227,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_FREE_DATA);
 
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);

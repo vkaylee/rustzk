@@ -219,17 +219,32 @@ fn test_tcp_partial_response_fragmented() {
         stream.write_all(&wrapped[8..]).unwrap();
         stream.flush().unwrap();
 
+        // Handle the automated TZAdj sync from connect()
+        let mut header_tz = [0u8; 8];
+        stream.read_exact(&mut header_tz).unwrap();
+        let (length_tz, _) = TCPWrapper::decode_header(&header_tz).unwrap();
+        let mut body_tz = vec![0u8; length_tz];
+        stream.read_exact(&mut body_tz).unwrap();
+        let pkt_tz = ZKPacket::from_bytes_owned(body_tz).unwrap();
+        assert_eq!(pkt_tz.command, CMD_OPTIONS_RRQ);
+        let res_tz = ZKPacket::new(CMD_ACK_OK, 1111, pkt_tz.reply_id, b"TZAdj=7\0".to_vec());
+        stream
+            .write_all(&TCPWrapper::wrap(&res_tz.to_bytes()))
+            .unwrap();
+
         // Now handle CMD_GET_TIME — send it as one tiny write per byte
         let mut header2 = [0u8; 8];
         stream.read_exact(&mut header2).unwrap();
         let (length2, _) = TCPWrapper::decode_header(&header2).unwrap();
         let mut body2 = vec![0u8; length2];
         stream.read_exact(&mut body2).unwrap();
+        let pkt2 = ZKPacket::from_bytes_owned(body2).unwrap();
+        assert_eq!(pkt2.command, CMD_GET_TIME);
 
         let t: u32 = ((25 * 12 * 31 + 5 * 31 + 14) * 86400) + (10 * 60 + 30) * 60;
         let mut payload = Vec::new();
         payload.write_u32::<LittleEndian>(t).unwrap();
-        let time_res = ZKPacket::new(CMD_ACK_OK, 1111, 1, payload);
+        let time_res = ZKPacket::new(CMD_ACK_OK, 1111, pkt2.reply_id, payload);
         let time_wrapped = TCPWrapper::wrap(&time_res.to_bytes());
 
         // Send byte-by-byte with small delays to force partial reads
@@ -244,7 +259,8 @@ fn test_tcp_partial_response_fragmented() {
             let (length3, _) = TCPWrapper::decode_header(&header3).unwrap();
             let mut body3 = vec![0u8; length3];
             stream.read_exact(&mut body3).unwrap();
-            let exit_res = ZKPacket::new(CMD_ACK_OK, 1111, 2, vec![]);
+            let pkt3 = ZKPacket::from_bytes_owned(body3).unwrap();
+            let exit_res = ZKPacket::new(CMD_ACK_OK, 1111, pkt3.reply_id, vec![]);
             stream
                 .write_all(&TCPWrapper::wrap(&exit_res.to_bytes()))
                 .unwrap();

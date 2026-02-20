@@ -23,10 +23,23 @@ fn test_read_sizes_split_response_tcp() {
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_CONNECT);
 
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
+        stream.flush().unwrap();
+
+        // 1.5 Handle TZAdj Sync (Automated from connect)
+        stream.read_exact(&mut header).unwrap();
+        let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+        let mut body = vec![0u8; length];
+        stream.read_exact(&mut body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
+        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=7\0".to_vec());
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -37,7 +50,7 @@ fn test_read_sizes_split_response_tcp() {
         let (length, _) = TCPWrapper::decode_header(&header).unwrap();
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(packet.command, CMD_GET_FREE_SIZES);
 
         // SYIMULATE BUG/SPLIT:
@@ -60,6 +73,19 @@ fn test_read_sizes_split_response_tcp() {
         let data_res = ZKPacket::new(CMD_ACK_DATA, session_id, packet.reply_id, sizes_payload);
         stream
             .write_all(&TCPWrapper::wrap(&data_res.to_bytes()))
+            .unwrap();
+        stream.flush().unwrap();
+
+        // 2.5 Handle TZAdj Sync (Automated from read_sizes)
+        stream.read_exact(&mut header).unwrap();
+        let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+        let mut body = vec![0u8; length];
+        stream.read_exact(&mut body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
+        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, b"TZAdj=7\0".to_vec());
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
         stream.flush().unwrap();
     });
