@@ -10,7 +10,7 @@ use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::models::{Attendance, User};
+use crate::models::{Attendance, Finger, User};
 use crate::protocol::{TCPWrapper, ZKPacket};
 
 #[derive(Error, Debug)]
@@ -1030,6 +1030,92 @@ impl ZK {
             Ok(())
         } else {
             Err(ZKError::Response("Failed to delete user".into()))
+        }
+    }
+
+    /// Retrieves all fingerprint templates from the device.
+    pub fn get_templates(&mut self) -> ZKResult<Vec<Finger>> {
+        self.read_sizes()?;
+        if self.fingers == 0 {
+            return Ok(Vec::new());
+        }
+
+        let templatedata = self.read_with_buffer(CMD_DB_RRQ, FCT_FINGERTMP, 0)?;
+        if templatedata.len() < 4 {
+            return Ok(Vec::new());
+        }
+
+        let mut total_size = LittleEndian::read_i32(&templatedata[0..4]) as usize;
+        let mut data = &templatedata[4..];
+        let mut templates = Vec::new();
+
+        while total_size > 0 && data.len() >= 6 {
+            let size = LittleEndian::read_u16(&data[0..2]) as usize;
+            let uid = LittleEndian::read_u16(&data[2..4]);
+            let fid = data[4];
+            let valid = data[5];
+
+            if data.len() < size {
+                break;
+            }
+
+            let template = data[6..size].to_vec();
+            templates.push(Finger {
+                uid,
+                fid,
+                valid,
+                template,
+            });
+
+            data = &data[size..];
+            if total_size >= size {
+                total_size -= size;
+            } else {
+                total_size = 0;
+            }
+        }
+
+        Ok(templates)
+    }
+
+    /// Retrieves a specific fingerprint template for a user and finger ID.
+    pub fn get_user_template(&mut self, uid: u16, fid: u8) -> ZKResult<Option<Finger>> {
+        for _ in 0..3 {
+            let mut payload = Vec::with_capacity(3);
+            payload.write_u16::<LittleEndian>(uid)?;
+            payload.write_u8(fid)?;
+
+            let res = self.send_command(_CMD_GET_USERTEMP, payload)?;
+            // This command typically returns CMD_DATA with the template
+            if res.command == CMD_DATA {
+                let mut template = res.payload.into_owned();
+                // Strip trailing nulls if present (common firmware quirk)
+                while template.ends_with(&[0]) && template.len() > 0 {
+                    template.pop();
+                }
+                return Ok(Some(Finger {
+                    uid,
+                    fid,
+                    valid: 1,
+                    template,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Deletes a specific fingerprint template for a user and finger ID.
+    pub fn delete_user_template(&mut self, uid: u16, fid: u8) -> ZKResult<()> {
+        let mut payload = Vec::with_capacity(3);
+        payload.write_u16::<LittleEndian>(uid)?;
+        payload.write_u8(fid)?;
+
+        let res = self.send_command(CMD_DELETE_USERTEMP, payload)?;
+        if res.command == CMD_ACK_OK {
+            let _ = self.refresh_data();
+            Ok(())
+        } else {
+            Err(ZKError::Response("Failed to delete user template".into()))
         }
     }
 
