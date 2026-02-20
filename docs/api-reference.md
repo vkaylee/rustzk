@@ -6,7 +6,7 @@
 Creates a new ZK instance.
 
 ### `pub fn set_password(&mut self, password: u32)`
-Sets the password for authentication. Default is 0.
+Sets the communication password (CommKey) for the device. If the device requires authentication, this password will be used automatically during the `connect()` handshake. Default is 0.
 
 ### `pub fn connect(&mut self, protocol: ZKProtocol) -> ZKResult<()>`
 Connects to the device using the specified protocol.
