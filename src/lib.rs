@@ -1119,6 +1119,125 @@ impl ZK {
         }
     }
 
+    /// Registers for specific real-time events.
+    pub fn reg_event(&mut self, flags: u32) -> ZKResult<()> {
+        let mut payload = Vec::with_capacity(4);
+        payload.write_u32::<LittleEndian>(flags)?;
+
+        let res = self.send_command(CMD_REG_EVENT, payload)?;
+        if res.command == CMD_ACK_OK {
+            Ok(())
+        } else {
+            Err(ZKError::Response(format!("Failed to register events with flags {}", flags)))
+        }
+    }
+
+    /// Listens for real-time events and yields attendance records as they occur.
+    /// This is a blocking call that will yield None on timeout.
+    pub fn listen_events(&mut self) -> ZKResult<impl Iterator<Item = ZKResult<Attendance>> + '_> {
+        // 1. Register for attendance log events if not already done
+        self.reg_event(EF_ATTLOG)?;
+
+        Ok(std::iter::from_fn(move || {
+            match self.read_packet() {
+                Ok(packet) => {
+                    // Send ACK_OK back to device to acknowledge receipt
+                    let _ = self.send_ack_ok();
+
+                    if packet.command != CMD_REG_EVENT {
+                        return Some(Err(ZKError::Response(format!("Unexpected command during event listening: {}", packet.command))));
+                    }
+
+                    let data = &packet.payload;
+                    if data.is_empty() {
+                        return None; // Or some signal to continue
+                    }
+
+                    // Decode event data based on length (matching pyzk logic)
+                    let (uid, user_id, status, punch, timestamp) = if data.len() == 10 {
+                        let uid = LittleEndian::read_u16(&data[0..2]) as u32;
+                        let status = data[2];
+                        let punch = data[3];
+                        let timehex = &data[4..10];
+                        let ts = ZK::decode_timehex(timehex).ok()?;
+                        (uid, uid.to_string(), status, punch, ts)
+                    } else if data.len() == 12 {
+                        let user_id_num = LittleEndian::read_u32(&data[0..4]);
+                        let status = data[4];
+                        let punch = data[5];
+                        let timehex = &data[6..12];
+                        let ts = ZK::decode_timehex(timehex).ok()?;
+                        (user_id_num, user_id_num.to_string(), status, punch, ts)
+                    } else if data.len() >= 32 {
+                        // User ID is string (24 bytes)
+                        let user_id = String::from_utf8_lossy(&data[0..24]).trim_matches('\0').to_string();
+                        let status = data[24];
+                        let punch = data[25];
+                        let timehex = &data[26..32];
+                        let ts = ZK::decode_timehex(timehex).ok()?;
+                        (0, user_id, status, punch, ts) // UID might be 0 for string-based IDs
+                    } else {
+                        return Some(Err(ZKError::InvalidData(format!("Unknown event data length: {}", data.len()))));
+                    };
+
+                    Some(Ok(Attendance {
+                        uid,
+                        user_id,
+                        timestamp,
+                        status,
+                        punch,
+                        timezone_offset: self.timezone_offset,
+                    }))
+                }
+                Err(ZKError::Network(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                    // This is expected during idle listening
+                    None
+                }
+                Err(e) => Some(Err(e)),
+            }
+        }))
+    }
+
+    /// Internal helper to send a simple ACK_OK response.
+    fn send_ack_ok(&mut self) -> ZKResult<()> {
+        let transport = self.transport.as_mut().ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+        let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, Vec::new());
+        
+        match transport {
+            ZKTransport::Tcp(stream) => {
+                let mut buf = Vec::with_capacity(16);
+                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
+                buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
+                buf.write_u32::<LittleEndian>(8)?;
+                packet.to_bytes_into(&mut buf)?;
+                stream.write_all(&buf)?;
+            }
+            ZKTransport::Udp(socket) => {
+                let mut buf = Vec::with_capacity(8);
+                packet.to_bytes_into(&mut buf)?;
+                socket.send(&buf)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Decodes a 6-byte compressed time format used in real-time events.
+    fn decode_timehex(hex: &[u8]) -> ZKResult<chrono::NaiveDateTime> {
+        if hex.len() < 6 {
+            return Err(ZKError::InvalidData("Timehex too short".into()));
+        }
+        let year = hex[0] as i32 + 2000;
+        let month = hex[1] as u32;
+        let day = hex[2] as u32;
+        let hour = hex[3] as u32;
+        let minute = hex[4] as u32;
+        let second = hex[5] as u32;
+
+        chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .and_then(|d| d.and_hms_opt(hour, minute, second))
+            .ok_or_else(|| ZKError::InvalidData("Invalid date/time in hex".into()))
+    }
+
             /// Helper to find the next available UID on the device.
             /// `start_uid`: The UID to start searching from (useful for testing in high ranges).
             pub fn get_next_free_uid(&mut self, start_uid: u16) -> ZKResult<u16> {
