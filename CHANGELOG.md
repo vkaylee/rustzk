@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.5] - 2026-02-20
+## [0.4.6] - 2026-02-20
 <<<<<<< HEAD
 ### Added
 - **Protocol Fidelity**: Aligned the checksum logic in `src/protocol.rs` with the `pyzk` reference implementation, ensuring perfect byte-level compatibility across all device firmware versions.
