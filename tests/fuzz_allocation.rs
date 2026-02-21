@@ -4,6 +4,14 @@
 //! to prevent memory exhaustion and buffer overflow vulnerabilities.
 
 use rustzk::{security, validation};
+use std::sync::Mutex;
+use std::sync::OnceLock;
+
+/// Shared lock for environment variable modifications in tests
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 /// Fuzz test TCP header parsing with malformed data
 #[test]
@@ -40,6 +48,8 @@ fn fuzz_tcp_header_parsing() {
 /// Fuzz test with varying packet sizes including boundary values
 #[test]
 fn fuzz_packet_size_validation() {
+    let _lock = env_lock().lock().unwrap();
+
     let test_sizes = vec![
         0, 1, 2, 3, 4, // Minimum sizes
         7, 8, 15, 16, // Power-of-2 boundaries
@@ -53,14 +63,22 @@ fn fuzz_packet_size_validation() {
 
     for (_i, size) in test_sizes.iter().enumerate() {
         let result = security::validate_packet_size(*size);
+        let current_max = security::get_max_packet_size();
 
-        match size {
-            size if *size <= security::MAX_PACKET_SIZE => {
-                assert!(result.is_ok(), "Size {} should be valid", size);
-            }
-            _ => {
-                assert!(result.is_err(), "Size {} should be invalid", size);
-            }
+        if *size <= current_max {
+            assert!(
+                result.is_ok(),
+                "Size {} should be valid (current max: {})",
+                size,
+                current_max
+            );
+        } else {
+            assert!(
+                result.is_err(),
+                "Size {} should be invalid (current max: {})",
+                size,
+                current_max
+            );
         }
     }
 }
@@ -140,6 +158,8 @@ fn fuzz_udp_packet_handling() {
 /// Fuzz test with environment variable changes
 #[test]
 fn fuzz_environment_variable_changes() {
+    let _lock = env_lock().lock().unwrap();
+
     let test_limits = vec![
         "1024", "8192", "65536", "262144", "1048576", "2097152", "16777216",
     ];
