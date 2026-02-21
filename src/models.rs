@@ -21,7 +21,7 @@ impl Attendance {
     /// Returns the timestamp as a DateTime with the device's fixed offset.
     pub fn timestamp_fixed(&self) -> DateTime<FixedOffset> {
         let offset = FixedOffset::east_opt(self.timezone_offset * 60)
-            .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            .unwrap_or_else(|| FixedOffset::east_opt(0).expect("UTC offset 0 is always valid"));
         offset
             .from_local_datetime(&self.timestamp)
             .single()

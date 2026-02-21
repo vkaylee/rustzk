@@ -2,14 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.4] - 2026-02-20
+## [0.4.5] - 2026-02-20
 ### Added
+- **Timezone Management**: Added `get_timezone()` and `get_option_value()` methods to actively query device configuration.
 - **High-Performance Caching**: Implemented an internal `user_id_cache` to speed up attendance log processing by mapping UIDs to User IDs locally.
 - **Bulk User Management**: Added `set_user_unchecked()` to allow high-speed user syncing without redundant uniqueness checks.
 - **Public Capacity Getters**: Added public getter methods for all device capacity fields (`users()`, `fingers()`, `records()`, etc.) to align with new encapsulation standards.
 
 ### Changed
 - **Optimized Attendance Retrieval**: `get_attendance()` now uses the internal cache, significantly reducing network traffic and processing time for large datasets.
+- **Improved Attendance Parsing**: Implemented a heuristic-based `record_size` detection that prioritizes standard protocol sizes (8, 16, 40 bytes), increasing reliability across different firmware versions.
+- **Safety Hardening**: Replaced potential panic points (`unwrap()`) in core time processing with safe error handling and descriptive `expect()` messages.
 - **Improved Code Quality**: Applied comprehensive formatting via `cargo fmt` and resolved all `clippy` warnings.
 
 ## [0.4.3] - 2026-02-20
