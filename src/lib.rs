@@ -2,6 +2,7 @@ pub mod constants;
 pub use crate::constants::*;
 pub mod models;
 pub mod protocol;
+pub mod security;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike};
@@ -233,6 +234,9 @@ impl ZK {
                 let (length, _) = TCPWrapper::decode_header(&header)
                     .map_err(|e| ZKError::InvalidData(e.to_string()))?;
 
+                // Validate packet size to prevent memory exhaustion attacks
+                crate::security::validate_packet_size(length)?;
+
                 let mut body = vec![0u8; length];
                 stream.read_exact(&mut body)?;
 
@@ -242,6 +246,10 @@ impl ZK {
                 let mut buf = vec![0u8; 2048];
                 let len = socket.recv(&mut buf)?;
                 buf.truncate(len);
+
+                // Validate UDP packet size
+                crate::security::validate_packet_size(buf.len())?;
+
                 ZKPacket::from_bytes_owned(buf)
             }
         }
@@ -680,11 +688,28 @@ impl ZK {
         }
 
         let total_size = byteorder::LittleEndian::read_u32(&attendance_data[0..4]) as usize;
-        let record_size = if self.records > 0 {
+        let mut record_size = if self.records > 0 {
             total_size / self.records as usize
         } else {
             0
         };
+
+        // Heuristic: Prefer standard record sizes if total_size is a multiple
+        if total_size > 0 {
+            if total_size.is_multiple_of(40) && (record_size == 0 || record_size.is_multiple_of(40))
+            {
+                record_size = 40;
+            } else if total_size.is_multiple_of(16)
+                && (record_size == 0 || record_size.is_multiple_of(16))
+            {
+                record_size = 16;
+            } else if total_size.is_multiple_of(8)
+                && (record_size == 0 || record_size.is_multiple_of(8))
+            {
+                record_size = 8;
+            }
+        }
+
         let data = &attendance_data[4..];
 
         let mut attendances = Vec::new();
@@ -803,17 +828,20 @@ impl ZK {
         command_string.push(0);
         let res = self.send_command(CMD_OPTIONS_RRQ, command_string)?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
-            let data = String::from_utf8_lossy(&res.payload)
-                .trim_matches('\0')
-                .to_string();
+            let data = String::from_utf8_lossy(&res.payload);
+            let data_str = data.trim_matches('\0').to_string();
+
             // Usually returns "Key=Value"
-            if let Some(pos) = data.find('=') {
-                Ok(data[pos + 1..].to_string())
+            if let Some(pos) = data_str.find('=') {
+                Ok(data_str[pos + 1..].to_string())
             } else {
-                Ok(data)
+                Ok(data_str)
             }
         } else {
-            Err(ZKError::Response(format!("Can't read option {}", key)))
+            Err(ZKError::Response(format!(
+                "Can't read option '{}' (Device returned CMD 0x{:X})",
+                key, res.command
+            )))
         }
     }
 
@@ -823,6 +851,14 @@ impl ZK {
 
     pub fn get_platform(&mut self) -> ZKResult<String> {
         self.get_option_value("~Platform")
+    }
+
+    /// Gets the device timezone adjustment (usually in hours).
+    pub fn get_timezone(&mut self) -> ZKResult<i32> {
+        let tz_str = self.get_option_value("TZAdj")?;
+        tz_str
+            .parse::<i32>()
+            .map_err(|_| ZKError::InvalidData(format!("Invalid timezone value: {}", tz_str)))
     }
 
     pub fn get_mac(&mut self) -> ZKResult<String> {
@@ -852,7 +888,7 @@ impl ZK {
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
             let naive = ZK::decode_time(&res.payload)?;
             let offset = FixedOffset::east_opt(self.timezone_offset * 60)
-                .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+                .unwrap_or_else(|| FixedOffset::east_opt(0).expect("UTC offset 0 is always valid"));
 
             offset
                 .from_local_datetime(&naive)
@@ -1455,3 +1491,4 @@ mod tests {
         assert_eq!(result.len(), 4);
     }
 }
+pub mod validation;

@@ -23,35 +23,23 @@ rustzk = "0.3.1"
 ```
 
 ## 🚀 Quick Start
+... (keep existing quick start)
 
-```rust
-use rustzk::{ZK, ZKProtocol};
+## 📖 Examples
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Initialize client
-    let mut zk = ZK::new("192.168.1.201", 4370);
-    
-    // 2. Connect (Auto-detect protocol)
-    zk.connect(ZKProtocol::Auto)?;
-    
-    // 3. Get device time (ISO-8601 with timezone)
-    let time = zk.get_time()?;
-    println!("Device Time: {}", time.to_rfc3339());
-    
-    // 4. Get attendance logs
-    let logs = zk.get_attendance()?;
-    for log in logs {
-        println!("User: {}, Time: {}, Status: {}", 
-            log.user_id, 
-            log.iso_format(), 
-            log.status
-        );
-    }
+The following examples are available in the `examples/` directory:
 
-    // 5. Disconnect
-    zk.disconnect()?;
-    Ok(())
-}
+- `check_device_info.rs`: Basic device info, MAC, SN, and Capacity.
+- `check_time.rs`: Check device time and drift.
+- `check_timezone.rs`: **New!** Scan for timezone configuration (TZAdj, StandardTime).
+- `get_attendance.rs`: Fetch historical attendance logs.
+- `live_events.rs`: Monitor real-time clock-in events.
+- `user_management.rs`: Add, delete, and list users.
+- `fingerprint_management.rs`: Manage biometric templates.
+
+Run any example using cargo:
+```bash
+cargo run --example check_timezone -- 192.168.1.201
 ```
 
 ## 📚 Documentation

@@ -2,6 +2,7 @@ use rustzk::{ZKProtocol, ZK};
 use std::env;
 
 fn main() {
+    env_logger::init();
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <ip> [port]", args[0]);
@@ -25,6 +26,18 @@ fn main() {
     }
 
     println!("Connected!\n");
+
+    if let Err(e) = zk.read_sizes() {
+        eprintln!("Failed to read device sizes: {}", e);
+    } else {
+        println!("--- Device Capacity & Usage ---");
+        println!("Users:      {} / {}", zk.users(), zk.users_cap());
+        println!("Fingers:    {} / {}", zk.fingers(), zk.fingers_cap());
+        println!("Records:    {} / {}", zk.records(), zk.records_cap());
+        println!("Faces:      {} / {}", zk.faces(), zk.faces_cap());
+        println!("Cards:      {}", zk.cards());
+        println!("-------------------------------\n");
+    }
 
     match zk.get_mac() {
         Ok(mac) => println!("MAC Address: {}", mac),

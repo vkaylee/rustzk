@@ -37,6 +37,24 @@ Deletes a specific fingerprint template from the device.
 ### `pub fn set_option(&mut self, key: &str, value: &str) -> ZKResult<()>`
 Sets a system option on the device (e.g., `DeviceName`).
 
+### `pub fn get_option_value(&mut self, key: &str) -> ZKResult<String>`
+Retrieves a raw configuration option from the device by its key name (e.g., `~SerialNumber`, `TZAdj`).
+
+### `pub fn get_timezone(&mut self) -> ZKResult<i32>`
+Retrieves the device timezone adjustment (usually in hours, e.g., `7` for UTC+7). This actively queries the device's `TZAdj` configuration parameter.
+
+### `pub fn get_serial_number(&mut self) -> ZKResult<String>`
+Retrieves the device serial number.
+
+### `pub fn get_mac(&mut self) -> ZKResult<String>`
+Retrieves the device MAC address.
+
+### `pub fn get_firmware_version(&mut self) -> ZKResult<String>`
+Retrieves the device firmware version.
+
+### `pub fn get_platform(&mut self) -> ZKResult<String>`
+Retrieves the device platform name (e.g., `ZAM180_TFT`).
+
 ### `pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>>`
 Retrieves the current device time. **Note:** On the first call, this method automatically fetches and caches the device's timezone offset (`TZAdj`) to provide localized results.
 
