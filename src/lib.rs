@@ -878,9 +878,9 @@ impl ZK {
     }
 
     /// Retrieves the current time from the device.
-    /// 
-    /// **Note:** This returns the time as configured on the device, mapped to 
-    /// the detected timezone offset. If the device time falls into a DST 
+    ///
+    /// **Note:** This returns the time as configured on the device, mapped to
+    /// the detected timezone offset. If the device time falls into a DST
     /// transition gap (non-existent time), this will return an error.
     pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>> {
         let _ = self.sync_timezone();
@@ -1023,7 +1023,7 @@ impl ZK {
                     )));
                 }
             }
-            
+
             // Update local map to reflect the new state for subsequent users in the batch
             user_id_to_uid.insert(user.user_id.clone(), user.uid);
         }

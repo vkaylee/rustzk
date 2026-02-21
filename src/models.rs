@@ -19,12 +19,12 @@ pub struct Attendance {
 
 impl Attendance {
     /// Returns the timestamp as a DateTime with the device's fixed offset.
-    /// 
-    /// **Note:** This method attempts to map the raw local time from the device 
-    /// to a specific offset. It may return `None` if the time is invalid or 
-    /// ambiguous (e.g., during DST transitions). 
-    /// 
-    /// For critical operations, prefer using the raw `.timestamp` (NaiveDateTime) 
+    ///
+    /// **Note:** This method attempts to map the raw local time from the device
+    /// to a specific offset. It may return `None` if the time is invalid or
+    /// ambiguous (e.g., during DST transitions).
+    ///
+    /// For critical operations, prefer using the raw `.timestamp` (NaiveDateTime)
     /// and handle timezones at the application level.
     pub fn timestamp_fixed(&self) -> Option<DateTime<FixedOffset>> {
         // Sanity check: limit offset to +/- 24 hours (1440 minutes)
@@ -33,14 +33,13 @@ impl Attendance {
         }
         let offset = FixedOffset::east_opt(self.timezone_offset * 60)
             .unwrap_or_else(|| FixedOffset::east_opt(0).expect("UTC offset 0 is always valid"));
-        offset
-            .from_local_datetime(&self.timestamp)
-            .single()
+        offset.from_local_datetime(&self.timestamp).single()
     }
 
     /// Returns the timestamp in UTC.
     pub fn timestamp_utc(&self) -> Option<DateTime<Utc>> {
-        self.timestamp_fixed().map(|fixed| fixed.with_timezone(&Utc))
+        self.timestamp_fixed()
+            .map(|fixed| fixed.with_timezone(&Utc))
     }
 
     /// Returns the timestamp formatted as an ISO8601 string with offset.
@@ -183,7 +182,8 @@ mod tests {
     #[test]
     fn test_attendance_safety_fallback() {
         use chrono::NaiveDateTime;
-        let naive = NaiveDateTime::parse_from_str("2026-02-19 09:16:41", "%Y-%m-%d %H:%M:%S").unwrap();
+        let naive =
+            NaiveDateTime::parse_from_str("2026-02-19 09:16:41", "%Y-%m-%d %H:%M:%S").unwrap();
 
         // Test with an invalid offset (e.g., 25 hours = 1500 minutes)
         // Our sanity check in timestamp_fixed should return None for offsets > 24h
@@ -193,7 +193,7 @@ mod tests {
             timestamp: naive,
             status: 1,
             punch: 0,
-            timezone_offset: 1500, 
+            timezone_offset: 1500,
         };
 
         // Should not panic, should return None

@@ -502,8 +502,9 @@ fn test_set_users_bulk_mock() {
                     // Empty list for get_users
                     let mut res_payload = vec![0u8; 5];
                     res_payload[0] = 1;
-                    <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 4); 
-                    let res = ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
+                    <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 4);
+                    let res =
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();

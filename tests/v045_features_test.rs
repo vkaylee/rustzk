@@ -36,14 +36,21 @@ fn test_get_option_and_timezone_mock() {
                         .unwrap();
                 }
                 CMD_OPTIONS_RRQ => {
-                    let key = String::from_utf8_lossy(&packet.payload).trim_matches('\0').to_string();
+                    let key = String::from_utf8_lossy(&packet.payload)
+                        .trim_matches('\0')
+                        .to_string();
                     let response_str = match key.as_str() {
                         "TZAdj" => "TZAdj=7\0",
                         "~SerialNumber" => "~SerialNumber=ABC12345\0",
                         _ => "Unknown=0\0",
                     };
-                    
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, response_str.as_bytes().to_vec());
+
+                    let res = ZKPacket::new(
+                        CMD_ACK_OK,
+                        session_id,
+                        packet.reply_id,
+                        response_str.as_bytes().to_vec(),
+                    );
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -57,7 +64,9 @@ fn test_get_option_and_timezone_mock() {
                 }
                 _ => {
                     let res = ZKPacket::new(CMD_ACK_UNKNOWN, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
             }
         }
@@ -103,7 +112,9 @@ fn test_attendance_heuristic_40bytes_mock() {
                 CMD_CONNECT => {
                     session_id = 7788;
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 CMD_GET_FREE_SIZES => {
                     let mut bytes = Vec::new();
@@ -112,7 +123,9 @@ fn test_attendance_heuristic_40bytes_mock() {
                         bytes.write_i32::<LittleEndian>(val).unwrap();
                     }
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, bytes);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 _CMD_PREPARE_BUFFER => {
                     let mut res_payload = vec![0u8; 5];
@@ -120,13 +133,16 @@ fn test_attendance_heuristic_40bytes_mock() {
                     // Total size = 4 (prefix) + 40 (one 40-byte record) = 44
                     LittleEndian::write_u32(&mut res_payload[1..5], 44);
 
-                    let res = ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    let res =
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
                 _CMD_READ_BUFFER => {
                     let mut data = Vec::new();
                     data.write_u32::<LittleEndian>(40).unwrap(); // Size prefix
-                    
+
                     // 40-byte record
                     data.write_u16::<LittleEndian>(10).unwrap(); // UID
                     let mut user_id_bytes = [0u8; 24];
@@ -138,12 +154,18 @@ fn test_attendance_heuristic_40bytes_mock() {
                     data.write_all(&[0u8; 8]).unwrap(); // Padding to reach 40 bytes
 
                     let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, data);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
-                CMD_EXIT => { break; }
+                CMD_EXIT => {
+                    break;
+                }
                 _ => {
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
-                    stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
                 }
             }
         }
