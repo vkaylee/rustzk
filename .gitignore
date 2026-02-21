@@ -1,2 +1,8 @@
 /target
 pyzk_ref/
+node_modules/
+package-lock.json
+package.json
+.ai-context-os/
+.cursorrules
+CLAUDE.md
