@@ -2,8 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.6] - 2026-02-20
-<<<<<<< HEAD
+## [0.4.7] - 2026-02-25
+### Added
+- **Dual Checksum Detection**: Added legacy checksum algorithm and auto-detection during handshake.
+- **Checksum API**: Added `set_legacy_checksum()` to skip auto-detection.
+- **Memory Safety Hardening**: Fixed integer safety by clamping negative `i32` and validating `MAX_RESPONSE_SIZE` bounds. Added zero-size guards in data retrieval methods.
+
+## [0.4.6] - 2026-02-21
 ### Added
 - **Protocol Fidelity**: Aligned the checksum logic in `src/protocol.rs` with the `pyzk` reference implementation, ensuring perfect byte-level compatibility across all device firmware versions.
 - **Parsing Robustness**: Introduced structured validation for user packet sizes (28/72 bytes) and added malformed data detection during GBK decoding.
@@ -13,9 +18,11 @@ All notable changes to this project will be documented in this file.
 - **Safety**: Removed blocking network I/O from the `Drop` implementation of the `ZK` struct. This prevents deadlocks and hangs during object destruction in high-concurrency or async environments.
 - **Refactored Logic**: Streamlined attendance and user parsing loops using the newly introduced protocol constants.
 
+## [0.4.5] - 2026-02-21
+### Fixed
+- **Testing**: Resolved race condition in fuzz testing by using a mutex for environment variables.
+
 ## [0.4.4] - 2026-02-20
-=======
->>>>>>> 51bb566
 ### Added
 - **Timezone Management**: Added `get_timezone()` and `get_option_value()` methods to actively query device configuration.
 - **High-Performance Caching**: Implemented an internal `user_id_cache` to speed up attendance log processing by mapping UIDs to User IDs locally.
