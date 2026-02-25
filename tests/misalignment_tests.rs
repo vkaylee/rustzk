@@ -193,7 +193,7 @@ fn test_receive_chunk_misalignment_tcp() {
         // MOCK MISALIGNMENT: Send a STALE CMD_DATA packet first
         let mut stale_data = Vec::new();
         stale_data.write_u32::<LittleEndian>(28).unwrap(); // size of data following
-        stale_data.extend_from_slice(&vec![0xEE; 28]);
+        stale_data.extend_from_slice(&[0xEE; 28]);
         let stale_res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id - 1, stale_data);
         stream
             .write_all(&TCPWrapper::wrap(&stale_res.to_bytes()))

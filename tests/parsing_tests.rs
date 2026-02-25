@@ -82,5 +82,5 @@ fn test_parse_user_28bytes() {
 #[test]
 fn test_max_response_size_limit() {
     // Logic verified via code review and manual inspection of read_with_buffer
-    assert!(true);
+    // MAX_RESPONSE_SIZE is enforced in get_users, get_attendance, and get_templates
 }

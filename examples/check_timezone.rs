@@ -6,7 +6,7 @@ fn main() {
     let ip = args.get(1).expect("IP required");
 
     let mut zk = ZK::new(ip, 4370);
-    if let Ok(_) = zk.connect(ZKProtocol::Auto) {
+    if zk.connect(ZKProtocol::Auto).is_ok() {
         let potential_keys = vec!["TZAdj", "~Tz", "StandardTime", "TimeZone", "DayLightTime"];
 
         println!("Scanning for timezone related options...");

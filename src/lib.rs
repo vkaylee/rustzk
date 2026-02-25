@@ -63,6 +63,7 @@ pub struct ZK {
     password: u32,
     timezone_offset: i32, // Offset in minutes
     timezone_synced: bool,
+    use_legacy_checksum: bool,
 }
 
 impl ZK {
@@ -89,12 +90,33 @@ impl ZK {
             password: 0,
             timezone_offset: 0,
             timezone_synced: false,
+            use_legacy_checksum: false,
         }
     }
 
     /// Sets the communication password for the device.
     pub fn set_password(&mut self, password: u32) {
         self.password = password;
+    }
+
+    /// Forces use of the legacy checksum algorithm (Rust bitwise NOT).
+    ///
+    /// By default, rustzk tries the default checksum first and automatically
+    /// falls back to legacy on timeout. Call this before [`connect`](Self::connect)
+    /// to skip the auto-detection and connect immediately with legacy checksum.
+    ///
+    /// # Known firmware requiring legacy checksum
+    /// - ZAM180_TFT (Ver 6.60 Aug 19 2021)
+    ///
+    /// # Example
+    /// ```no_run
+    /// use rustzk::{ZK, ZKProtocol};
+    /// let mut zk = ZK::new("192.168.1.201", 4370);
+    /// zk.set_legacy_checksum(true); // Skip auto-detect, connect faster
+    /// zk.connect(ZKProtocol::TCP).unwrap();
+    /// ```
+    pub fn set_legacy_checksum(&mut self, legacy: bool) {
+        self.use_legacy_checksum = legacy;
     }
 
     /// Internal helper to generate the authentication communication key.
@@ -171,12 +193,103 @@ impl ZK {
         self.perform_connect_handshake()
     }
 
+    /// Performs the ZK protocol handshake with **auto-detection** of checksum algorithm.
+    ///
+    /// # Auto-detection Flow
+    ///
+    /// 1. Send `CMD_CONNECT` with current checksum (default or legacy) using a 5s timeout
+    /// 2. If the device responds → handshake succeeds, use this checksum going forward
+    /// 3. If timeout (device silently dropped our packet due to wrong checksum):
+    ///    - Flip `use_legacy_checksum` flag
+    ///    - Retry `CMD_CONNECT` with alternative checksum (5s timeout)
+    /// 4. Restore original timeout for subsequent data transfers
+    ///
+    /// Total worst-case: ~10s (5s per attempt × 2 algorithms).
     fn perform_connect_handshake(&mut self) -> ZKResult<()> {
         self.session_id = 0;
         self.reply_id = USHRT_MAX - 1;
 
-        let res = self.send_command(CMD_CONNECT, Vec::new())?;
+        // Use a short timeout for handshake probes (5s each) so auto-fallback
+        // completes in ~10s max instead of waiting the full user-configured timeout.
+        let handshake_timeout = Duration::from_secs(5);
+        let saved_timeout = self.timeout;
+        self.set_transport_read_timeout(handshake_timeout);
 
+        // Attempt 1: Try current checksum algorithm
+        let result = self.send_command(CMD_CONNECT, Vec::new());
+
+        match result {
+            Ok(res) => {
+                // Restore original timeout for data transfers
+                self.set_transport_read_timeout(saved_timeout);
+                self.finish_handshake(res)
+            }
+            Err(ZKError::Network(ref e))
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                // Timeout means the device silently rejected our packet — wrong checksum.
+                // Flip to the alternative checksum algorithm and retry.
+                log::info!(
+                    "Handshake timeout with {} checksum. Retrying with {} checksum...",
+                    if self.use_legacy_checksum {
+                        "legacy"
+                    } else {
+                        "default"
+                    },
+                    if self.use_legacy_checksum {
+                        "default"
+                    } else {
+                        "legacy"
+                    }
+                );
+                self.use_legacy_checksum = !self.use_legacy_checksum;
+                self.session_id = 0;
+                self.reply_id = USHRT_MAX - 1;
+
+                // Attempt 2: Try alternative checksum algorithm
+                let result = self.send_command(CMD_CONNECT, Vec::new());
+
+                // Restore original timeout for data transfers
+                self.set_transport_read_timeout(saved_timeout);
+
+                match result {
+                    Ok(res) => {
+                        log::info!(
+                            "Connected with {} checksum",
+                            if self.use_legacy_checksum {
+                                "legacy"
+                            } else {
+                                "default"
+                            }
+                        );
+                        self.finish_handshake(res)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => {
+                self.set_transport_read_timeout(saved_timeout);
+                Err(e)
+            }
+        }
+    }
+
+    /// Helper to set read timeout on the underlying transport.
+    fn set_transport_read_timeout(&self, timeout: Duration) {
+        if let Some(ref transport) = self.transport {
+            match transport {
+                ZKTransport::Tcp(stream) => {
+                    let _ = stream.set_read_timeout(Some(timeout));
+                }
+                ZKTransport::Udp(socket) => {
+                    let _ = socket.set_read_timeout(Some(timeout));
+                }
+            }
+        }
+    }
+
+    fn finish_handshake(&mut self, res: ZKPacket<'static>) -> ZKResult<()> {
         // Update session_id if we got a valid response (OK or UNAUTH)
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_UNAUTH {
             self.session_id = res.session_id;
@@ -302,7 +415,11 @@ impl ZK {
             self.reply_id
         );
 
-        let packet = ZKPacket::new(command, self.session_id, self.reply_id, payload);
+        let packet = if self.use_legacy_checksum {
+            ZKPacket::new_with_legacy(command, self.session_id, self.reply_id, payload)
+        } else {
+            ZKPacket::new(command, self.session_id, self.reply_id, payload)
+        };
 
         let transport = self
             .transport
@@ -356,9 +473,9 @@ impl ZK {
                 for field in &mut fields {
                     *field = rdr.read_i32::<byteorder::LittleEndian>()?;
                 }
-                self.users = fields[4] as u32;
-                self.fingers = fields[6] as u32;
-                self.records = fields[8] as u32;
+                self.users = fields[4].max(0) as u32;
+                self.fingers = fields[6].max(0) as u32;
+                self.records = fields[8].max(0) as u32;
                 self.cards = fields[12];
                 self.fingers_cap = fields[14];
                 self.users_cap = fields[15];
@@ -366,7 +483,7 @@ impl ZK {
             }
             if data.len() >= 92 {
                 let mut rdr = io::Cursor::new(&data[80..92]);
-                self.faces = rdr.read_i32::<byteorder::LittleEndian>()? as u32;
+                self.faces = rdr.read_i32::<byteorder::LittleEndian>()?.max(0) as u32;
                 let _ = rdr.read_i32::<byteorder::LittleEndian>()?;
                 self.faces_cap = rdr.read_i32::<byteorder::LittleEndian>()?;
             }
@@ -519,6 +636,11 @@ impl ZK {
             )));
         }
 
+        if size == 0 {
+            let _ = self.send_command(CMD_FREE_DATA, Vec::new());
+            return Ok(Vec::new());
+        }
+
         let max_chunk = if let Some(ZKTransport::Tcp(_)) = self.transport {
             TCP_MAX_CHUNK
         } else {
@@ -592,6 +714,15 @@ impl ZK {
         }
 
         let total_size = byteorder::LittleEndian::read_u32(&userdata[0..4]) as usize;
+        if total_size > MAX_RESPONSE_SIZE {
+            return Err(ZKError::InvalidData(format!(
+                "User data total_size {} exceeds maximum {}",
+                total_size, MAX_RESPONSE_SIZE
+            )));
+        }
+        if total_size == 0 {
+            return Ok(Vec::new());
+        }
         self.user_packet_size = total_size / self.users as usize;
         let data = &userdata[4..];
 
@@ -688,7 +819,13 @@ impl ZK {
         }
 
         let total_size = byteorder::LittleEndian::read_u32(&attendance_data[0..4]) as usize;
-        let mut record_size = if self.records > 0 {
+        if total_size > MAX_RESPONSE_SIZE {
+            return Err(ZKError::InvalidData(format!(
+                "Attendance data total_size {} exceeds maximum {}",
+                total_size, MAX_RESPONSE_SIZE
+            )));
+        }
+        let mut record_size = if self.records > 0 && total_size > 0 {
             total_size / self.records as usize
         } else {
             0
@@ -1142,7 +1279,20 @@ impl ZK {
             return Ok(Vec::new());
         }
 
-        let mut total_size = LittleEndian::read_i32(&templatedata[0..4]) as usize;
+        let raw_total = LittleEndian::read_i32(&templatedata[0..4]);
+        if raw_total < 0 {
+            return Err(ZKError::InvalidData(format!(
+                "Negative template data size: {}",
+                raw_total
+            )));
+        }
+        let mut total_size = raw_total as usize;
+        if total_size > MAX_RESPONSE_SIZE {
+            return Err(ZKError::InvalidData(format!(
+                "Template data size {} exceeds maximum {}",
+                total_size, MAX_RESPONSE_SIZE
+            )));
+        }
         let mut data = &templatedata[4..];
         let mut templates = Vec::new();
 

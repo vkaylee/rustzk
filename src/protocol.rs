@@ -4,7 +4,13 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Cow;
 use std::io::{self, Cursor};
 
-/// Calculates the ZK protocol checksum for the given data.
+/// Calculates the ZK protocol checksum for raw byte data (default algorithm).
+///
+/// This uses the Python pyzk-aligned algorithm: `!(sum as i32)` then adding
+/// `USHRT_MAX` until non-negative. This produces a result that is exactly 1 less
+/// than the legacy Rust bitwise NOT approach.
+///
+/// For packet-level checksums, prefer [`ZKPacket::new`] or [`ZKPacket::new_with_legacy`].
 pub fn calculate_checksum(data: &[u8]) -> u16 {
     let mut checksum: u32 = 0;
     let mut i = 0;
@@ -54,7 +60,16 @@ pub struct ZKPacket<'a> {
 }
 
 impl<'a> ZKPacket<'a> {
-    /// Creates a new ZKPacket and automatically calculates the checksum.
+    /// Creates a new ZKPacket and automatically calculates the checksum
+    /// using the **default** (Python pyzk-aligned) algorithm.
+    ///
+    /// # Checksum Algorithm
+    ///
+    /// The default algorithm uses signed negation: `!(sum as i32)` then adds
+    /// `USHRT_MAX` (65535) until non-negative. For a sum of 999, this produces:
+    /// `!(999 as i32) = -1000`, then `-1000 + 65535 = 64535 (0xFC17)`.
+    ///
+    /// Compatible with firmware that follows the Python pyzk reference implementation.
     pub fn new(
         command: u16,
         session_id: u16,
@@ -69,6 +84,40 @@ impl<'a> ZKPacket<'a> {
             payload: payload.into(),
         };
         packet.checksum = packet.calculate_checksum();
+        packet
+    }
+
+    /// Creates a new ZKPacket using the **legacy** checksum algorithm.
+    ///
+    /// # Checksum Algorithm
+    ///
+    /// The legacy algorithm uses Rust's unsigned bitwise NOT: `!(sum as u16)`.
+    /// For a sum of 999, this produces: `!999u16 = 65535 - 999 = 64536 (0xFC18)`.
+    ///
+    /// This is exactly **1 greater** than the default algorithm for all inputs.
+    ///
+    /// # Firmware Compatibility
+    ///
+    /// Required by older ZKTeco firmware that validates checksums strictly:
+    /// - **ZAM180_TFT** (Ver 6.60 Aug 19 2021) — confirmed via real device test
+    /// - Likely other firmware released before ~2020
+    ///
+    /// These devices silently drop packets with the default checksum (no error
+    /// response), causing connection timeouts.
+    pub fn new_with_legacy(
+        command: u16,
+        session_id: u16,
+        reply_id: u16,
+        payload: impl Into<Cow<'a, [u8]>>,
+    ) -> Self {
+        let mut packet = ZKPacket {
+            command,
+            checksum: 0,
+            session_id,
+            reply_id,
+            payload: payload.into(),
+        };
+        packet.checksum = packet.calculate_checksum_legacy();
         packet
     }
 
@@ -99,16 +148,58 @@ impl<'a> ZKPacket<'a> {
             }
         }
 
-        while sum > USHRT_MAX as u32 {
-            sum -= USHRT_MAX as u32;
-        }
-
+        // Final step: signed negation (Python pyzk-compatible).
+        // Python: ~sum produces -(sum+1), then adding 65535 gives (65534 - sum).
+        // This differs by exactly 1 from the legacy u16 NOT approach (65535 - sum).
         let mut checksum = !(sum as i32);
         while checksum < 0 {
             checksum += USHRT_MAX as i32;
         }
 
         checksum as u16
+    }
+
+    /// Legacy checksum algorithm (v0.4.4 and earlier).
+    ///
+    /// Uses Rust's native unsigned bitwise NOT on u16: `!(sum as u16) = 65535 - sum`.
+    /// This produces a checksum exactly **1 greater** than the default algorithm.
+    ///
+    /// # Why two algorithms?
+    ///
+    /// Python's `~x` on a signed int gives `-(x+1)`, which after adding 65535
+    /// yields `65534 - x`. Rust's `!x` on a u16 yields `65535 - x`. The 1-bit
+    /// difference causes some firmware (e.g., ZAM180) to reject packets that
+    /// use the default algorithm.
+    fn calculate_checksum_legacy(&self) -> u16 {
+        let mut sum: u32 = 0;
+
+        sum += self.command as u32;
+        sum += self.session_id as u32;
+        sum += self.reply_id as u32;
+
+        let mut i = 0;
+        let payload_len = self.payload.len();
+        while i + 1 < payload_len {
+            let val = u16::from_le_bytes([self.payload[i], self.payload[i + 1]]);
+            sum += val as u32;
+            if sum > USHRT_MAX as u32 {
+                sum -= USHRT_MAX as u32;
+            }
+            i += 2;
+        }
+
+        if i < payload_len {
+            sum += self.payload[i] as u32;
+            if sum > USHRT_MAX as u32 {
+                sum -= USHRT_MAX as u32;
+            }
+        }
+
+        while sum > USHRT_MAX as u32 {
+            sum -= USHRT_MAX as u32;
+        }
+
+        !(sum as u16)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {

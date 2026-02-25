@@ -948,18 +948,11 @@ fn test_timezone_sync_from_device() {
             stream.read_exact(&mut body).unwrap();
 
             let packet = ZKPacket::from_bytes(&body).unwrap();
-            let res_cmd = if packet.command == CMD_CONNECT {
-                CMD_ACK_OK
-            } else if packet.command == CMD_OPTIONS_RRQ {
-                CMD_ACK_OK
-            } else if packet.command == CMD_GET_FREE_SIZES {
-                CMD_ACK_OK
-            } else if packet.command == _CMD_PREPARE_BUFFER {
-                CMD_PREPARE_DATA
-            } else if packet.command == _CMD_READ_BUFFER {
-                CMD_DATA
-            } else {
-                CMD_ACK_OK
+            let res_cmd = match packet.command {
+                CMD_CONNECT | CMD_OPTIONS_RRQ | CMD_GET_FREE_SIZES => CMD_ACK_OK,
+                _CMD_PREPARE_BUFFER => CMD_PREPARE_DATA,
+                _CMD_READ_BUFFER => CMD_DATA,
+                _ => CMD_ACK_OK,
             };
 
             let mut payload = Vec::new();
@@ -1004,7 +997,7 @@ fn test_timezone_sync_from_device() {
     let logs = zk.get_attendance().unwrap();
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].timezone_offset(), 480);
-    assert_eq!(logs[0].iso_format().ends_with("+08:00"), true);
+    assert!(logs[0].iso_format().ends_with("+08:00"));
 
     zk.disconnect().unwrap();
     server_handle.join().unwrap();

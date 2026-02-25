@@ -16,7 +16,7 @@ fn env_lock() -> &'static Mutex<()> {
 /// Fuzz test TCP header parsing with malformed data
 #[test]
 fn fuzz_tcp_header_parsing() {
-    let test_cases = vec![
+    let test_cases = [
         // Edge cases
         vec![0x00, 0x00],                                     // Too short
         vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], // Max values
@@ -61,7 +61,7 @@ fn fuzz_packet_size_validation() {
         33554431, 33554432, 67108863, 134217727, // Larger values
     ];
 
-    for (_i, size) in test_sizes.iter().enumerate() {
+    for size in test_sizes.iter() {
         let result = security::validate_packet_size(*size);
         let current_max = security::get_max_packet_size();
 
@@ -201,7 +201,7 @@ fn stress_concurrent_allocation_pattern() {
                 let _test_data = vec![thread_id as u8; size];
             }
 
-            thread_id as usize
+            thread_id
         });
 
         handles.push(handle);
@@ -267,10 +267,7 @@ fn fuzz_corrupted_header_patterns() {
                 let result = validation::validate_protocol_header(&corrupted);
 
                 // None should cause panic
-                match result {
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
+                let _ = result;
             }
         }
     }
