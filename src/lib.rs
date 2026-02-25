@@ -184,6 +184,9 @@ impl ZK {
         self.perform_connect_handshake()
     }
 
+    /// Note: High-volume packet streams (e.g., fetching large attendance logs) over UDP
+    /// can overwhelm the default OS UDP receive buffer (`SO_RCVBUF`), causing packet loss.
+    /// In such environments, consider using TCP instead.
     fn connect_udp(&mut self) -> ZKResult<()> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.connect(&self.addr)?;
@@ -666,8 +669,9 @@ impl ZK {
                         "Too many empty responses from device during buffer read".into(),
                     ));
                 }
-                // Give the device time to prepare the next chunk of data
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                // Give the device time to prepare the next chunk of data using exponential backoff
+                let sleep_ms = std::cmp::min(1 << empty_responses_count, 50);
+                std::thread::sleep(std::time::Duration::from_millis(sleep_ms as u64));
                 continue;
             }
 
