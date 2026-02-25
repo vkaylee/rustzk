@@ -176,6 +176,7 @@ impl ZK {
             .ok_or_else(|| ZKError::Connection(format!("No address found for {}", self.addr)))?;
 
         let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
+        stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(self.timeout))?;
         stream.set_write_timeout(Some(self.timeout))?;
 
