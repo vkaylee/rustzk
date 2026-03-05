@@ -59,11 +59,13 @@ pub struct ZK {
     users_cap: i32,
     rec_cap: i32,
     faces_cap: i32,
-    pub encoding: String,
+    pub encoding: &'static str,
     password: u32,
     timezone_offset: i32, // Offset in minutes
     timezone_synced: bool,
     use_legacy_checksum: bool,
+    /// Reusable buffer for UDP reads to avoid per-packet heap allocation.
+    udp_buf: Vec<u8>,
 }
 
 impl ZK {
@@ -86,7 +88,8 @@ impl ZK {
             users_cap: 0,
             rec_cap: 0,
             faces_cap: 0,
-            encoding: "UTF-8".to_string(),
+            encoding: "UTF-8",
+            udp_buf: vec![0u8; 2048],
             password: 0,
             timezone_offset: 0,
             timezone_synced: false,
@@ -149,7 +152,14 @@ impl ZK {
 
     /// Connect to the ZK device using the specified protocol.
     /// Supports TCP, UDP, or Auto-detection.
+    ///
+    /// Returns an error if already connected. Call [`disconnect`](Self::disconnect) first.
     pub fn connect(&mut self, protocol: ZKProtocol) -> ZKResult<()> {
+        if self.is_connected {
+            return Err(ZKError::Connection(
+                "Already connected. Call disconnect() first.".into(),
+            ));
+        }
         match protocol {
             ZKProtocol::TCP => self.connect_tcp(),
             ZKProtocol::UDP => self.connect_udp(),
@@ -220,7 +230,7 @@ impl ZK {
         self.set_transport_read_timeout(handshake_timeout);
 
         // Attempt 1: Try current checksum algorithm
-        let result = self.send_command(CMD_CONNECT, Vec::new());
+        let result = self.send_command(CMD_CONNECT, &[]);
 
         match result {
             Ok(res) => {
@@ -252,7 +262,7 @@ impl ZK {
                 self.reply_id = USHRT_MAX - 1;
 
                 // Attempt 2: Try alternative checksum algorithm
-                let result = self.send_command(CMD_CONNECT, Vec::new());
+                let result = self.send_command(CMD_CONNECT, &[]);
 
                 // Restore original timeout for data transfers
                 self.set_transport_read_timeout(saved_timeout);
@@ -301,7 +311,7 @@ impl ZK {
 
         if res.command == CMD_ACK_UNAUTH {
             let command_string = ZK::make_commkey(self.password, self.session_id, 50);
-            let auth_res = self.send_command(CMD_AUTH, command_string)?;
+            let auth_res = self.send_command(CMD_AUTH, &command_string)?;
             if auth_res.command == CMD_ACK_UNAUTH {
                 return Err(ZKError::Connection(
                     "Unauthorized: Password required or incorrect".into(),
@@ -340,10 +350,12 @@ impl ZK {
 
     /// Low-level method to read a single ZK packet from the transport.
     fn read_packet(&mut self) -> ZKResult<ZKPacket<'static>> {
+        // Destructure to borrow disjoint fields separately
         let transport = self
             .transport
             .as_mut()
             .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+        let udp_buf = &mut self.udp_buf;
         match transport {
             ZKTransport::Tcp(stream) => {
                 let mut header = [0u8; 8];
@@ -360,14 +372,14 @@ impl ZK {
                 ZKPacket::from_bytes_owned(body)
             }
             ZKTransport::Udp(socket) => {
-                let mut buf = vec![0u8; 2048];
-                let len = socket.recv(&mut buf)?;
-                buf.truncate(len);
+                udp_buf.resize(2048, 0);
+                let len = socket.recv(udp_buf)?;
+                let packet_data = udp_buf[..len].to_vec();
 
                 // Validate UDP packet size
-                crate::security::validate_packet_size(buf.len())?;
+                crate::security::validate_packet_size(packet_data.len())?;
 
-                ZKPacket::from_bytes_owned(buf)
+                ZKPacket::from_bytes_owned(packet_data)
             }
         }
     }
@@ -405,7 +417,7 @@ impl ZK {
     pub(crate) fn send_command(
         &mut self,
         command: u16,
-        payload: Vec<u8>,
+        payload: &[u8],
     ) -> ZKResult<ZKPacket<'static>> {
         self.reply_id = self.reply_id.wrapping_add(1);
         if self.reply_id == USHRT_MAX {
@@ -451,7 +463,7 @@ impl ZK {
 
     /// Fetches device capacity and usage statistics.
     pub fn read_sizes(&mut self) -> ZKResult<()> {
-        let mut res = self.send_command(CMD_GET_FREE_SIZES, Vec::new())?;
+        let mut res = self.send_command(CMD_GET_FREE_SIZES, &[])?;
 
         // Handle case where device sends ACK_OK then ACK_DATA/Response separately
         if res.command == CMD_ACK_OK && res.payload.len() < 16 {
@@ -593,11 +605,11 @@ impl ZK {
     }
 
     fn read_chunk_into(&mut self, start: i32, size: i32, data: &mut Vec<u8>) -> ZKResult<()> {
-        let mut payload = Vec::with_capacity(8);
-        payload.write_i32::<byteorder::LittleEndian>(start)?;
-        payload.write_i32::<byteorder::LittleEndian>(size)?;
+        let mut payload = [0u8; 8];
+        byteorder::LittleEndian::write_i32(&mut payload[0..4], start);
+        byteorder::LittleEndian::write_i32(&mut payload[4..8], size);
 
-        let res = self.send_command(_CMD_READ_BUFFER, payload)?;
+        let res = self.send_command(_CMD_READ_BUFFER, &payload)?;
         if res.command == CMD_ACK_OK {
             // If we get ACK for read chunk, it means data is coming next.
             // Wait for the actual data packet.
@@ -609,13 +621,13 @@ impl ZK {
     }
 
     fn read_with_buffer(&mut self, command: u16, fct: u8, ext: u32) -> ZKResult<Vec<u8>> {
-        let mut payload = Vec::new();
-        payload.write_u8(1)?; // ZK6/8 flag?
-        payload.write_u16::<byteorder::LittleEndian>(command)?;
-        payload.write_u32::<byteorder::LittleEndian>(fct as u32)?;
-        payload.write_u32::<byteorder::LittleEndian>(ext)?;
+        let mut payload = [0u8; 11];
+        payload[0] = 1; // ZK6/8 flag
+        byteorder::LittleEndian::write_u16(&mut payload[1..3], command);
+        byteorder::LittleEndian::write_u32(&mut payload[3..7], fct as u32);
+        byteorder::LittleEndian::write_u32(&mut payload[7..11], ext);
 
-        let res = self.send_command(_CMD_PREPARE_BUFFER, payload)?;
+        let res = self.send_command(_CMD_PREPARE_BUFFER, &payload)?;
         if res.command == CMD_DATA {
             return Ok(res.payload.into_owned());
         }
@@ -641,7 +653,7 @@ impl ZK {
         }
 
         if size == 0 {
-            let _ = self.send_command(CMD_FREE_DATA, Vec::new());
+            let _ = self.send_command(CMD_FREE_DATA, &[]);
             return Ok(Vec::new());
         }
 
@@ -685,7 +697,7 @@ impl ZK {
         }
 
         // Free data buffer
-        let _ = self.send_command(CMD_FREE_DATA, Vec::new());
+        let _ = self.send_command(CMD_FREE_DATA, &[]);
 
         Ok(data)
     }
@@ -731,7 +743,7 @@ impl ZK {
         self.user_packet_size = total_size / self.users as usize;
         let data = &userdata[4..];
 
-        let mut users = Vec::new();
+        let mut users = Vec::with_capacity(self.users as usize);
         let mut offset = 0;
 
         if self.user_packet_size == USER_PACKET_SIZE_SMALL {
@@ -854,7 +866,7 @@ impl ZK {
 
         let data = &attendance_data[4..];
 
-        let mut attendances = Vec::new();
+        let mut attendances = Vec::with_capacity(self.records as usize);
         let mut offset = 0;
 
         if record_size == ATT_RECORD_SIZE_8
@@ -955,7 +967,7 @@ impl ZK {
     }
 
     pub fn get_firmware_version(&mut self) -> ZKResult<String> {
-        let res = self.send_command(CMD_GET_VERSION, Vec::new())?;
+        let res = self.send_command(CMD_GET_VERSION, &[])?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
             Ok(String::from_utf8_lossy(&res.payload)
                 .trim_matches('\0')
@@ -968,7 +980,7 @@ impl ZK {
     pub fn get_option_value(&mut self, key: &str) -> ZKResult<String> {
         let mut command_string = key.as_bytes().to_vec();
         command_string.push(0);
-        let res = self.send_command(CMD_OPTIONS_RRQ, command_string)?;
+        let res = self.send_command(CMD_OPTIONS_RRQ, &command_string)?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
             let data = String::from_utf8_lossy(&res.payload);
             let data_str = data.trim_matches('\0').to_string();
@@ -1026,7 +1038,7 @@ impl ZK {
     /// transition gap (non-existent time), this will return an error.
     pub fn get_time(&mut self) -> ZKResult<DateTime<FixedOffset>> {
         let _ = self.sync_timezone();
-        let res = self.send_command(CMD_GET_TIME, Vec::new())?;
+        let res = self.send_command(CMD_GET_TIME, &[])?;
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
             let naive = ZK::decode_time(&res.payload)?;
             let offset = FixedOffset::east_opt(self.timezone_offset * 60)
@@ -1045,10 +1057,10 @@ impl ZK {
         // ZKTeco devices usually work in local time.
         let local_naive = t.naive_local();
         let encoded = ZK::encode_time(local_naive);
-        let mut payload = Vec::with_capacity(4);
-        payload.write_u32::<LittleEndian>(encoded)?;
+        let mut payload = [0u8; 4];
+        byteorder::LittleEndian::write_u32(&mut payload, encoded);
 
-        let res = self.send_command(CMD_SET_TIME, payload)?;
+        let res = self.send_command(CMD_SET_TIME, &payload)?;
         if res.command == CMD_ACK_OK {
             Ok(())
         } else {
@@ -1059,7 +1071,7 @@ impl ZK {
     /// Sets a device option by key and value.
     pub fn set_option(&mut self, key: &str, value: &str) -> ZKResult<()> {
         let command_string = format!("{}={}\0", key, value);
-        let res = self.send_command(CMD_OPTIONS_WRQ, command_string.into_bytes())?;
+        let res = self.send_command(CMD_OPTIONS_WRQ, command_string.as_bytes())?;
         if res.command == CMD_ACK_OK {
             Ok(())
         } else {
@@ -1076,25 +1088,23 @@ impl ZK {
     }
 
     pub fn restart(&mut self) -> ZKResult<()> {
-        self.send_command(CMD_RESTART, Vec::new())?;
+        self.send_command(CMD_RESTART, &[])?;
         self.is_connected = false;
         self.transport = None;
         Ok(())
     }
 
     pub fn poweroff(&mut self) -> ZKResult<()> {
-        self.send_command(CMD_POWEROFF, Vec::new())?;
+        self.send_command(CMD_POWEROFF, &[])?;
         self.is_connected = false;
         self.transport = None;
         Ok(())
     }
 
     pub fn unlock(&mut self, seconds: u32) -> ZKResult<()> {
-        let mut payload = Vec::new();
-        // ZK protocol expects time in 100ms units for unlock?
-        // Python: pack("I",int(time)*10)
-        payload.write_u32::<byteorder::LittleEndian>(seconds * 10)?;
-        let res = self.send_command(CMD_UNLOCK, payload)?;
+        let mut payload = [0u8; 4];
+        byteorder::LittleEndian::write_u32(&mut payload, seconds * 10);
+        let res = self.send_command(CMD_UNLOCK, &payload)?;
         if res.command == CMD_ACK_OK {
             Ok(())
         } else {
@@ -1104,7 +1114,10 @@ impl ZK {
 
     pub fn disconnect(&mut self) -> ZKResult<()> {
         if self.is_connected {
-            let _ = self.send_command(CMD_EXIT, Vec::new());
+            // Use a short timeout for disconnect — don't wait the full 60s
+            // if the device is unreachable (powered off, network down, etc.)
+            self.set_transport_read_timeout(Duration::from_secs(3));
+            let _ = self.send_command(CMD_EXIT, &[]);
             self.is_connected = false;
         }
         self.transport = None;
@@ -1113,7 +1126,7 @@ impl ZK {
 
     /// Refreshes the device's internal data.
     pub fn refresh_data(&mut self) -> ZKResult<()> {
-        let res = self.send_command(CMD_REFRESHDATA, Vec::new())?;
+        let res = self.send_command(CMD_REFRESHDATA, &[])?;
         if res.command == CMD_ACK_OK {
             Ok(())
         } else {
@@ -1250,7 +1263,7 @@ impl ZK {
             payload.write_all(&user_id_bytes)?;
         }
 
-        let res = self.send_command(CMD_USER_WRQ, payload)?;
+        let res = self.send_command(CMD_USER_WRQ, &payload)?;
         if res.command == CMD_ACK_OK {
             Ok(())
         } else {
@@ -1260,10 +1273,10 @@ impl ZK {
 
     /// Deletes a specific user by UID.
     pub fn delete_user(&mut self, uid: u16) -> ZKResult<()> {
-        let mut payload = Vec::with_capacity(2);
-        payload.write_u16::<LittleEndian>(uid)?;
+        let mut payload = [0u8; 2];
+        byteorder::LittleEndian::write_u16(&mut payload, uid);
 
-        let res = self.send_command(CMD_DELETE_USER, payload)?;
+        let res = self.send_command(CMD_DELETE_USER, &payload)?;
         if res.command == CMD_ACK_OK {
             let _ = self.refresh_data();
             Ok(())
@@ -1299,7 +1312,7 @@ impl ZK {
             )));
         }
         let mut data = &templatedata[4..];
-        let mut templates = Vec::new();
+        let mut templates = Vec::with_capacity(self.fingers as usize);
 
         while total_size > 0 && data.len() >= 6 {
             let size = LittleEndian::read_u16(&data[0..2]) as usize;
@@ -1333,11 +1346,11 @@ impl ZK {
     /// Retrieves a specific fingerprint template for a user and finger ID.
     pub fn get_user_template(&mut self, uid: u16, fid: u8) -> ZKResult<Option<Finger>> {
         for _ in 0..3 {
-            let mut payload = Vec::with_capacity(3);
-            payload.write_u16::<LittleEndian>(uid)?;
-            payload.write_u8(fid)?;
+            let mut payload = [0u8; 3];
+            byteorder::LittleEndian::write_u16(&mut payload[0..2], uid);
+            payload[2] = fid;
 
-            let res = self.send_command(_CMD_GET_USERTEMP, payload)?;
+            let res = self.send_command(_CMD_GET_USERTEMP, &payload)?;
             // This command typically returns CMD_DATA with the template
             if res.command == CMD_DATA {
                 let mut template = res.payload.into_owned();
@@ -1358,11 +1371,11 @@ impl ZK {
 
     /// Deletes a specific fingerprint template for a user and finger ID.
     pub fn delete_user_template(&mut self, uid: u16, fid: u8) -> ZKResult<()> {
-        let mut payload = Vec::with_capacity(3);
-        payload.write_u16::<LittleEndian>(uid)?;
-        payload.write_u8(fid)?;
+        let mut payload = [0u8; 3];
+        byteorder::LittleEndian::write_u16(&mut payload[0..2], uid);
+        payload[2] = fid;
 
-        let res = self.send_command(CMD_DELETE_USERTEMP, payload)?;
+        let res = self.send_command(CMD_DELETE_USERTEMP, &payload)?;
         if res.command == CMD_ACK_OK {
             let _ = self.refresh_data();
             Ok(())
@@ -1373,10 +1386,10 @@ impl ZK {
 
     /// Registers for specific real-time events.
     pub fn reg_event(&mut self, flags: u32) -> ZKResult<()> {
-        let mut payload = Vec::with_capacity(4);
-        payload.write_u32::<LittleEndian>(flags)?;
+        let mut payload = [0u8; 4];
+        byteorder::LittleEndian::write_u32(&mut payload, flags);
 
-        let res = self.send_command(CMD_REG_EVENT, payload)?;
+        let res = self.send_command(CMD_REG_EVENT, &payload)?;
         if res.command == CMD_ACK_OK {
             Ok(())
         } else {
@@ -1596,10 +1609,11 @@ impl ZK {
 }
 impl Drop for ZK {
     fn drop(&mut self) {
-        // We no longer call self.disconnect() here because it performs blocking network I/O
-        // which can cause hangs during object destruction.
-        // The transport will be closed automatically when it is dropped.
-        self.is_connected = false;
+        // Auto-disconnect: safe because disconnect() uses a 3s timeout,
+        // so it won't hang even if the device is unreachable.
+        if self.is_connected {
+            let _ = self.disconnect();
+        }
     }
 }
 

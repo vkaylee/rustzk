@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.8] - 2026-03-05
+### Changed
+- **Zero-Heap Command Payloads**: Replaced all `Vec<u8>` heap allocations with stack-based `[u8; N]` arrays for command payloads (`send_command` now takes `&[u8]` instead of `Vec<u8>`).
+- **Safe Auto-Disconnect on Drop**: Re-enabled `disconnect()` in `Drop` implementation with a 3-second timeout, ensuring connections are always returned to the device without risking hangs.
+- **Disconnect Timeout**: `disconnect()` now uses a short 3-second read timeout instead of the full 60-second user-configured timeout, preventing long waits when the device is unreachable.
+- **Pre-allocated Template Buffer**: `get_templates()` now pre-allocates with `Vec::with_capacity()` based on known finger count.
+
+### Added
+- **Double-Connect Guard**: `connect()` now returns a clear error if already connected, preventing protocol state corruption.
+- **New Tests**: Added `test_zk_double_connect_returns_error`, `test_zk_disconnect_uses_short_timeout`, and heap optimization tests validating zero-allocation command paths.
+
 ## [0.4.7] - 2026-02-25
 ### Added
 - **Dual Checksum Detection**: Added legacy checksum algorithm and auto-detection during handshake.
