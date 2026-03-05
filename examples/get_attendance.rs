@@ -37,22 +37,6 @@ fn main() {
     }
     if let Ok(t) = zk.get_time() {
         println!("Device Time   : {}", t.to_rfc3339());
-
-        // Sync time if drift > 5 seconds
-        let now = chrono::Local::now();
-        let now_fixed = chrono::DateTime::<chrono::FixedOffset>::from(now);
-        let drift = (now_fixed.timestamp() - t.timestamp()).abs();
-        if drift > 5 {
-            println!("Drift detected: {}s. Syncing time...", drift);
-            if zk.set_time(now_fixed).is_ok() {
-                println!("Time synced successfully.");
-                if let Ok(new_t) = zk.get_time() {
-                    println!("New Device Time: {}", new_t.to_rfc3339());
-                }
-            } else {
-                println!("Failed to sync time.");
-            }
-        }
     }
 
     // Capacity

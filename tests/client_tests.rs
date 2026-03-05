@@ -183,7 +183,7 @@ fn test_mock_udp_connect() {
     let result = zk.connect(ZKProtocol::UDP);
 
     assert!(result.is_ok());
-    assert!(zk.is_connected);
+    assert!(zk.is_connected());
 
     server_handle.join().unwrap();
 }
@@ -269,7 +269,7 @@ fn test_tcp_partial_response_fragmented() {
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
-    assert!(zk.is_connected);
+    assert!(zk.is_connected());
 
     // get_time should work even with fragmented TCP responses
     let time = zk.get_time().unwrap();
@@ -450,7 +450,7 @@ fn test_connect_fallback_udp() {
     let result = zk.connect(ZKProtocol::Auto);
 
     assert!(result.is_ok());
-    assert!(zk.is_connected);
+    assert!(zk.is_connected());
     // Verify it chose UDP transport (we can't easily check private field, but success implies it worked)
 
     server_handle.join().unwrap();

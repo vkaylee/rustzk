@@ -53,7 +53,7 @@ fn test_zk_drop_auto_disconnects() {
     {
         let mut zk = ZK::new("127.0.0.1", port);
         zk.connect(ZKProtocol::TCP).expect("Failed to connect");
-        assert!(zk.is_connected);
+        assert!(zk.is_connected());
         // zk will be dropped at the end of this block.
         // Drop should auto-disconnect by sending CMD_EXIT.
     }
@@ -112,7 +112,7 @@ fn test_zk_manual_disconnect_then_drop() {
         let mut zk = ZK::new("127.0.0.1", port);
         zk.connect(ZKProtocol::TCP).unwrap();
         zk.disconnect().unwrap(); // Manual disconnect
-        assert!(!zk.is_connected);
+        assert!(!zk.is_connected());
         // zk will be dropped here, but it's already disconnected
     }
 
@@ -164,7 +164,7 @@ fn test_zk_double_connect_returns_error() {
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP)
         .expect("First connect should succeed");
-    assert!(zk.is_connected);
+    assert!(zk.is_connected());
 
     // Second connect should fail with "Already connected"
     let result = zk.connect(ZKProtocol::TCP);

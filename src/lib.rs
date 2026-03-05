@@ -47,7 +47,7 @@ pub struct ZK {
     session_id: u16,
     reply_id: u16,
     pub timeout: Duration,
-    pub is_connected: bool,
+    is_connected: bool,
     user_id_cache: Option<HashMap<u16, String>>,
     pub user_packet_size: usize,
     users: u32,
@@ -191,7 +191,13 @@ impl ZK {
         stream.set_write_timeout(Some(self.timeout))?;
 
         self.transport = Some(ZKTransport::Tcp(stream));
-        self.perform_connect_handshake()
+        match self.perform_connect_handshake() {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.transport = None;
+                Err(e)
+            }
+        }
     }
 
     /// Note: High-volume packet streams (e.g., fetching large attendance logs) over UDP
@@ -204,7 +210,13 @@ impl ZK {
         socket.set_write_timeout(Some(self.timeout))?;
 
         self.transport = Some(ZKTransport::Udp(socket));
-        self.perform_connect_handshake()
+        match self.perform_connect_handshake() {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.transport = None;
+                Err(e)
+            }
+        }
     }
 
     /// Performs the ZK protocol handshake with **auto-detection** of checksum algorithm.
@@ -1088,17 +1100,17 @@ impl ZK {
     }
 
     pub fn restart(&mut self) -> ZKResult<()> {
-        self.send_command(CMD_RESTART, &[])?;
+        let result = self.send_command(CMD_RESTART, &[]);
         self.is_connected = false;
         self.transport = None;
-        Ok(())
+        result.map(|_| ())
     }
 
     pub fn poweroff(&mut self) -> ZKResult<()> {
-        self.send_command(CMD_POWEROFF, &[])?;
+        let result = self.send_command(CMD_POWEROFF, &[]);
         self.is_connected = false;
         self.transport = None;
-        Ok(())
+        result.map(|_| ())
     }
 
     pub fn unlock(&mut self, seconds: u32) -> ZKResult<()> {
@@ -1602,6 +1614,9 @@ impl ZK {
     }
     pub fn cards(&self) -> i32 {
         self.cards
+    }
+    pub fn is_connected(&self) -> bool {
+        self.is_connected
     }
     pub fn user_packet_size(&self) -> usize {
         self.user_packet_size

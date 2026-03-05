@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.9] - 2026-03-05
+### Fixed
+- **Transport Leak on Handshake Failure**: `connect_tcp()` and `connect_udp()` now clean up the transport socket if the protocol handshake fails, preventing file descriptor leaks.
+- **`restart()`/`poweroff()` State Consistency**: Both methods now always reset `is_connected` and `transport` regardless of whether `send_command` succeeds, preventing inconsistent state when the device is unreachable.
+- **Remove Auto-Sync Time from Example**: Removed unintended time sync logic from `get_attendance` example — the library should not modify device state in examples.
+
+### Changed
+- **`is_connected` Encapsulation**: Changed `is_connected` from `pub` field to private with a `pub fn is_connected()` getter, preventing direct mutation by library users.
+- **PTY-Safe Test Workflow**: Added `.agent/workflows/test.md` for PTY-safe test execution in AI agent environments.
+
+### Added
+- **Connection Handling Tests**: New `connection_handling_tests.rs` with 3 tests covering transport cleanup, restart error handling, and poweroff error handling.
+
 ## [0.4.8] - 2026-03-05
 ### Changed
 - **Zero-Heap Command Payloads**: Replaced all `Vec<u8>` heap allocations with stack-based `[u8; N]` arrays for command payloads (`send_command` now takes `&[u8]` instead of `Vec<u8>`).

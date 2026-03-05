@@ -81,7 +81,7 @@ fn test_auth_handshake_mock() {
     // connect() should handle CMD_ACK_UNAUTH and send CMD_AUTH automatically
     let res = zk.connect(ZKProtocol::TCP);
     assert!(res.is_ok(), "Connection with auth should succeed");
-    assert!(zk.is_connected, "ZK should be marked as connected");
+    assert!(zk.is_connected(), "ZK should be marked as connected");
 
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
@@ -146,7 +146,7 @@ fn test_connect_with_password_mock() {
 
     let result = zk.connect(ZKProtocol::TCP);
     assert!(result.is_ok());
-    assert!(zk.is_connected);
+    assert!(zk.is_connected());
 
     zk.disconnect().unwrap();
     server_handle.join().unwrap();

@@ -176,7 +176,7 @@ fn test_auto_fallback_to_legacy_checksum() {
     zk.connect(ZKProtocol::TCP).unwrap();
     let elapsed = start.elapsed();
 
-    assert!(zk.is_connected, "Should be connected after auto-fallback");
+    assert!(zk.is_connected(), "Should be connected after auto-fallback");
     // Auto-detection should take ~5s (first timeout) + connect time
     assert!(
         elapsed >= Duration::from_secs(4),
@@ -234,7 +234,7 @@ fn test_set_legacy_checksum_skips_autodetect() {
     zk.connect(ZKProtocol::TCP).unwrap();
     let elapsed = start.elapsed();
 
-    assert!(zk.is_connected, "Should connect with legacy checksum");
+    assert!(zk.is_connected(), "Should connect with legacy checksum");
     // Should be near-instant (no 5s timeout for auto-detection)
     assert!(
         elapsed < Duration::from_secs(2),
