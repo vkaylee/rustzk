@@ -165,10 +165,13 @@ impl ZK {
             ZKProtocol::UDP => self.connect_udp(),
             ZKProtocol::Auto => {
                 // Try TCP first
+                let saved_checksum = self.use_legacy_checksum;
                 match self.connect_tcp() {
                     Ok(_) => Ok(()),
                     Err(e) => {
                         log::info!("TCP connect failed: {}. Falling back to UDP...", e);
+                        // Reset checksum state — TCP handshake may have flipped it
+                        self.use_legacy_checksum = saved_checksum;
                         self.connect_udp()
                     }
                 }
@@ -325,6 +328,7 @@ impl ZK {
             let command_string = ZK::make_commkey(self.password, self.session_id, 50);
             let auth_res = self.send_command(CMD_AUTH, &command_string)?;
             if auth_res.command == CMD_ACK_UNAUTH {
+                self.session_id = 0; // Reset dirty session_id on auth failure
                 return Err(ZKError::Connection(
                     "Unauthorized: Password required or incorrect".into(),
                 ));
@@ -431,6 +435,11 @@ impl ZK {
         command: u16,
         payload: &[u8],
     ) -> ZKResult<ZKPacket<'static>> {
+        // Check transport BEFORE mutating reply_id to avoid dirty state on error
+        if self.transport.is_none() {
+            return Err(ZKError::Connection("Not connected".into()));
+        }
+
         self.reply_id = self.reply_id.wrapping_add(1);
         if self.reply_id == USHRT_MAX {
             self.reply_id -= USHRT_MAX;
@@ -1620,6 +1629,15 @@ impl ZK {
     }
     pub fn user_packet_size(&self) -> usize {
         self.user_packet_size
+    }
+    pub fn session_id(&self) -> u16 {
+        self.session_id
+    }
+    pub fn reply_id(&self) -> u16 {
+        self.reply_id
+    }
+    pub fn use_legacy_checksum(&self) -> bool {
+        self.use_legacy_checksum
     }
 }
 impl Drop for ZK {

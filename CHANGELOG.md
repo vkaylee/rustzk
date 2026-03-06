@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.10] - 2026-03-06
+### Fixed
+- **Auto Fallback Checksum State**: `connect(ZKProtocol::Auto)` now preserves the `use_legacy_checksum` flag when TCP fails and falls back to UDP, preventing unnecessary 5–10s latency from starting UDP handshake with a wrong checksum.
+- **Auth Failure Session Cleanup**: `finish_handshake()` now resets `session_id` to 0 when authentication fails (`CMD_ACK_UNAUTH`), preventing stale session state.
+- **`send_command()` Reply ID Guard**: `send_command()` now checks transport availability *before* incrementing `reply_id`, preventing silent state mutation on "Not connected" errors.
+
 ## [0.4.9] - 2026-03-05
 ### Fixed
 - **Transport Leak on Handshake Failure**: `connect_tcp()` and `connect_udp()` now clean up the transport socket if the protocol handshake fails, preventing file descriptor leaks.
