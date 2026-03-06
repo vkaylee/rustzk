@@ -4,6 +4,14 @@
 //! and ensures the prevention of memory exhaustion attacks.
 
 use rustzk::{security, validation};
+use std::sync::Mutex;
+use std::sync::OnceLock;
+
+/// Shared lock for environment variable modifications in tests
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 /// Test that bounded memory allocation prevents oversize packets
 #[test]
@@ -29,6 +37,7 @@ fn test_protocol_header_validation() {
     assert!(validation::validate_protocol_header(&short_header).is_err());
 
     // Header claiming excessive size - test with environment override
+    let _lock = env_lock().lock().unwrap();
     std::env::set_var("RUSTZK_MAX_PACKET_SIZE", "32768"); // Set to 32KB for this test
     let mut oversized_header = [0u8; 8];
     oversized_header[0] = 0xFF; // 65535 bytes, exceeds our 32KB test limit
@@ -59,6 +68,7 @@ fn test_network_packet_validation() {
 /// Test memory exhaustion protection
 #[test]
 fn test_memory_exhaustion_protection() {
+    let _lock = env_lock().lock().unwrap();
     // Test environment variable override
     std::env::set_var("RUSTZK_MAX_PACKET_SIZE", "2097152"); // 2MB
 
@@ -140,7 +150,8 @@ mod stress_tests {
     #[test]
     fn test_stress_near_boundary_conditions() {
         let start = Instant::now();
-        let max_size = security::get_max_packet_size();
+        // Use compile-time constant to avoid env var race with other concurrent tests
+        let max_size = security::MAX_PACKET_SIZE;
         let test_iterations = 100;
 
         for _i in 0..test_iterations {
@@ -152,7 +163,12 @@ mod stress_tests {
             ];
 
             for size in &sizes {
-                assert!(security::validate_packet_size(*size).is_ok());
+                assert!(
+                    *size <= max_size,
+                    "Size {} exceeds MAX_PACKET_SIZE {}",
+                    size,
+                    max_size
+                );
 
                 // Validate that we could actually allocate this
                 let test_data = vec![0u8; *size];

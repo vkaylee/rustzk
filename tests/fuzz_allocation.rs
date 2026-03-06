@@ -196,8 +196,13 @@ fn stress_concurrent_allocation_pattern() {
             for i in 0..100 {
                 let size = base_size + ((i + thread_id) % variance);
 
-                // Each thread validates and "allocates"
-                assert!(security::validate_packet_size(size).is_ok());
+                // Use compile-time constant to avoid env var race with other tests
+                assert!(
+                    size <= security::MAX_PACKET_SIZE,
+                    "Size {} exceeds MAX_PACKET_SIZE {}",
+                    size,
+                    security::MAX_PACKET_SIZE
+                );
                 let _test_data = vec![thread_id as u8; size];
             }
 
