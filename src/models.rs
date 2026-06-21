@@ -75,11 +75,10 @@ impl Attendance {
         if self.timezone_offset.abs() > 1440 {
             return None;
         }
-        let offset = FixedOffset::east_opt(self.timezone_offset * 60)
-            .unwrap_or_else(|| {
-                #[allow(clippy::unwrap_used)]
-                FixedOffset::east_opt(0).unwrap()
-            });
+        let offset = FixedOffset::east_opt(self.timezone_offset * 60).unwrap_or_else(|| {
+            #[allow(clippy::unwrap_used)]
+            FixedOffset::east_opt(0).unwrap()
+        });
         offset.from_local_datetime(&self.timestamp).single()
     }
 
