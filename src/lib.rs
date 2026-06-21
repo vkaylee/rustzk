@@ -653,8 +653,10 @@ impl ZK {
             return Ok(res.payload.into_owned());
         }
 
-        // Parse size: prioritize offset 1 (standard) if length >= 5
-        let size = if res.payload.len() >= 5 {
+        // Parse size: prioritize offset 1 (standard) if length >= 5.
+        // Fallback for offset misalignment: if size parsed at offset 1 exceeds MAX_RESPONSE_SIZE,
+        // and payload length >= 4, check if offset 0 size is valid (<= MAX_RESPONSE_SIZE).
+        let mut size = if res.payload.len() >= 5 {
             byteorder::LittleEndian::read_u32(&res.payload[1..5]) as usize
         } else if res.payload.len() >= 4 {
             // Fallback for short ACK_OK payloads
@@ -665,6 +667,18 @@ impl ZK {
                 res.payload.len()
             )));
         };
+
+        if res.payload.len() >= 5 && size > MAX_RESPONSE_SIZE {
+            let alt_size = byteorder::LittleEndian::read_u32(&res.payload[0..4]) as usize;
+            if alt_size <= MAX_RESPONSE_SIZE {
+                log::warn!(
+                    "Oversized size parsed at offset 1 ({}), falling back to offset 0 ({})",
+                    size,
+                    alt_size
+                );
+                size = alt_size;
+            }
+        }
 
         if size > MAX_RESPONSE_SIZE {
             return Err(ZKError::InvalidData(format!(
