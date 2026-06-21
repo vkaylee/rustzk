@@ -4,20 +4,64 @@ use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 #[derive(Debug, Clone)]
 pub struct Attendance {
     /// Internal record UID (sequence number).
-    pub uid: u32,
+    pub(crate) uid: u32,
     /// The user ID string associated with the record.
-    pub user_id: String,
+    pub(crate) user_id: String,
     /// The raw timestamp from the device.
-    pub timestamp: NaiveDateTime,
+    pub(crate) timestamp: NaiveDateTime,
     /// Attendance status code.
-    pub status: u8,
+    pub(crate) status: u8,
     /// Punch type (e.g., finger, face, card).
-    pub punch: u8,
+    pub(crate) punch: u8,
     /// The timezone offset in minutes applied to this record.
     pub(crate) timezone_offset: i32,
 }
 
 impl Attendance {
+    /// Creates a new Attendance record.
+    pub fn new(
+        uid: u32,
+        user_id: String,
+        timestamp: NaiveDateTime,
+        status: u8,
+        punch: u8,
+        timezone_offset: i32,
+    ) -> Self {
+        Self {
+            uid,
+            user_id,
+            timestamp,
+            status,
+            punch,
+            timezone_offset,
+        }
+    }
+
+    /// Getter for uid.
+    pub fn uid(&self) -> u32 {
+        self.uid
+    }
+
+    /// Getter for user_id.
+    pub fn user_id(&self) -> &str {
+        &self.user_id
+    }
+
+    /// Getter for timestamp.
+    pub fn timestamp(&self) -> NaiveDateTime {
+        self.timestamp
+    }
+
+    /// Getter for status.
+    pub fn status(&self) -> u8 {
+        self.status
+    }
+
+    /// Getter for punch.
+    pub fn punch(&self) -> u8 {
+        self.punch
+    }
+
     /// Returns the timestamp as a DateTime with the device's fixed offset.
     ///
     /// **Note:** This method attempts to map the raw local time from the device
@@ -31,8 +75,10 @@ impl Attendance {
         if self.timezone_offset.abs() > 1440 {
             return None;
         }
-        let offset = FixedOffset::east_opt(self.timezone_offset * 60)
-            .unwrap_or_else(|| FixedOffset::east_opt(0).expect("UTC offset 0 is always valid"));
+        let offset = FixedOffset::east_opt(self.timezone_offset * 60).unwrap_or_else(|| {
+            #[allow(clippy::unwrap_used)]
+            FixedOffset::east_opt(0).unwrap()
+        });
         offset.from_local_datetime(&self.timestamp).single()
     }
 
@@ -61,22 +107,83 @@ impl Attendance {
 #[derive(Debug, Clone)]
 pub struct User {
     /// Internal user UID.
-    pub uid: u16,
+    pub(crate) uid: u16,
     /// User's display name.
-    pub name: String,
+    pub(crate) name: String,
     /// User's privilege level (Admin, User, etc.).
-    pub privilege: u8,
+    pub(crate) privilege: u8,
     /// User's numeric password (if any).
-    pub password: String,
+    pub(crate) password: String,
     /// ID of the group the user belongs to.
-    pub group_id: String,
+    pub(crate) group_id: String,
     /// The alphanumeric user ID string.
-    pub user_id: String,
+    pub(crate) user_id: String,
     /// ID of the proximity card assigned to the user.
-    pub card: u32,
+    pub(crate) card: u32,
 }
 
 impl User {
+    /// Creates a new User record.
+    pub fn new(
+        uid: u16,
+        name: String,
+        privilege: u8,
+        password: String,
+        group_id: String,
+        user_id: String,
+        card: u32,
+    ) -> Self {
+        Self {
+            uid,
+            name,
+            privilege,
+            password,
+            group_id,
+            user_id,
+            card,
+        }
+    }
+
+    /// Getter for uid.
+    pub fn uid(&self) -> u16 {
+        self.uid
+    }
+
+    /// Getter for name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Setter for name.
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+
+    /// Getter for privilege.
+    pub fn privilege(&self) -> u8 {
+        self.privilege
+    }
+
+    /// Getter for password.
+    pub fn password(&self) -> &str {
+        &self.password
+    }
+
+    /// Getter for group_id.
+    pub fn group_id(&self) -> &str {
+        &self.group_id
+    }
+
+    /// Getter for user_id.
+    pub fn user_id(&self) -> &str {
+        &self.user_id
+    }
+
+    /// Getter for card.
+    pub fn card(&self) -> u32 {
+        self.card
+    }
+
     /// Returns true if the user is disabled.
     pub fn is_disabled(&self) -> bool {
         (self.privilege & 1) != 0
@@ -97,16 +204,49 @@ impl User {
 #[derive(Debug, Clone)]
 pub struct Finger {
     /// UID of the user this finger belongs to.
-    pub uid: u16,
+    pub(crate) uid: u16,
     /// Finger ID (0-9).
-    pub fid: u8,
+    pub(crate) fid: u8,
     /// Whether the template is valid.
-    pub valid: u8,
+    pub(crate) valid: u8,
     /// The raw binary fingerprint template data.
-    pub template: Vec<u8>,
+    pub(crate) template: Vec<u8>,
+}
+
+impl Finger {
+    /// Creates a new Finger record.
+    pub fn new(uid: u16, fid: u8, valid: u8, template: Vec<u8>) -> Self {
+        Self {
+            uid,
+            fid,
+            valid,
+            template,
+        }
+    }
+
+    /// Getter for uid.
+    pub fn uid(&self) -> u16 {
+        self.uid
+    }
+
+    /// Getter for fid.
+    pub fn fid(&self) -> u8 {
+        self.fid
+    }
+
+    /// Getter for valid.
+    pub fn valid(&self) -> u8 {
+        self.valid
+    }
+
+    /// Getter for template.
+    pub fn template(&self) -> &[u8] {
+        &self.template
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -202,5 +342,34 @@ mod tests {
 
         // ISO format should fallback to naive representation
         assert_eq!(att_invalid.iso_format(), "2026-02-19T09:16:41");
+    }
+
+    #[test]
+    fn test_uncovered_models() {
+        let naive = chrono::NaiveDate::from_ymd_opt(2024, 3, 9)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        let att = Attendance::new(10, "101".to_string(), naive, 1, 3, 420);
+        assert_eq!(att.uid(), 10);
+        assert_eq!(att.user_id(), "101");
+        assert_eq!(att.timestamp(), naive);
+        assert_eq!(att.status(), 1);
+        assert_eq!(att.punch(), 3);
+        assert!(att.timestamp_fixed().is_some());
+
+        let mut user = User {
+            uid: 1,
+            name: "Initial".to_string(),
+            privilege: 0,
+            password: "pass".to_string(),
+            group_id: "grp".to_string(),
+            user_id: "1".to_string(),
+            card: 0,
+        };
+        user.set_name("Updated".to_string());
+        assert_eq!(user.name(), "Updated");
+        assert_eq!(user.password(), "pass");
+        assert_eq!(user.group_id(), "grp");
     }
 }

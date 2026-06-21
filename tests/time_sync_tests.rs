@@ -24,9 +24,9 @@ fn test_lazy_timezone_sync_on_get_time() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_CONNECT);
+        assert_eq!(packet.command(), CMD_CONNECT);
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -37,12 +37,12 @@ fn test_lazy_timezone_sync_on_get_time() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        assert_eq!(packet.command(), CMD_OPTIONS_RRQ);
 
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             b"TZAdj=7\0".to_vec(),
         );
         stream
@@ -55,14 +55,14 @@ fn test_lazy_timezone_sync_on_get_time() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_GET_TIME);
+        assert_eq!(packet.command(), CMD_GET_TIME);
 
         // Send a known time (e.g., 2026-02-20 10:00:00)
         let t: u32 = 839845230; // Encoded time for known date
         let mut payload = Vec::new();
         payload.write_u32::<LittleEndian>(t).unwrap();
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, payload);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), payload);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -105,7 +105,7 @@ fn test_lazy_sync_happens_only_once() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let pkt1 = ZKPacket::from_bytes_owned(body).unwrap();
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, pkt1.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, pkt1.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -116,12 +116,12 @@ fn test_lazy_sync_happens_only_once() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_OPTIONS_RRQ, "Should ask for TZAdj");
+        assert_eq!(packet.command(), CMD_OPTIONS_RRQ, "Should ask for TZAdj");
 
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             b"TZAdj=8\0".to_vec(),
         );
         stream
@@ -138,7 +138,7 @@ fn test_lazy_sync_happens_only_once() {
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            pkt3.reply_id,
+            pkt3.reply_id(),
             839845230u32.to_le_bytes().to_vec(),
         );
         stream
@@ -152,7 +152,8 @@ fn test_lazy_sync_happens_only_once() {
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
         assert_eq!(
-            packet.command, CMD_GET_TIME,
+            packet.command(),
+            CMD_GET_TIME,
             "Should immediately call GET_TIME, no re-sync"
         );
 
@@ -160,7 +161,7 @@ fn test_lazy_sync_happens_only_once() {
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             839845230u32.to_le_bytes().to_vec(),
         );
         stream

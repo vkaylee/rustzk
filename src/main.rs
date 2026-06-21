@@ -1,3 +1,8 @@
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+
 use rustzk::{ZKProtocol, ZK};
 use std::env;
 
@@ -68,7 +73,11 @@ fn main() {
             for user in &users {
                 println!(
                     "  UID: {:>4} | ID: {:>10} | Name: {:>20} | Privilege: {} | Card: {}",
-                    user.uid, user.user_id, user.name, user.privilege, user.card
+                    user.uid(),
+                    user.user_id(),
+                    user.name(),
+                    user.privilege(),
+                    user.card()
                 );
             }
         }

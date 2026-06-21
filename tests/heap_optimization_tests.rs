@@ -47,17 +47,17 @@ fn test_send_command_empty_slice() {
                 CMD_REFRESHDATA,
                 CMD_EXIT,
             ];
-            if empty_payload_commands.contains(&req.command) {
+            if empty_payload_commands.contains(&req.command()) {
                 assert!(
-                    req.payload.is_empty(),
+                    req.payload().is_empty(),
                     "Command 0x{:X} should have empty payload but got {} bytes",
-                    req.command,
-                    req.payload.len()
+                    req.command(),
+                    req.payload().len()
                 );
-                empty_payload_cmds.push(req.command);
+                empty_payload_cmds.push(req.command());
             }
 
-            match req.command {
+            match req.command() {
                 CMD_GET_FREE_SIZES => {
                     let mut bytes = Vec::new();
                     for _ in 0..20 {
@@ -65,7 +65,7 @@ fn test_send_command_empty_slice() {
                     }
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, bytes),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), bytes),
                     );
                 }
                 CMD_GET_VERSION => {
@@ -74,7 +74,7 @@ fn test_send_command_empty_slice() {
                         &ZKPacket::new(
                             CMD_ACK_OK,
                             session_id,
-                            req.reply_id,
+                            req.reply_id(),
                             b"Ver 6.60\0".to_vec(),
                         ),
                     );
@@ -85,13 +85,13 @@ fn test_send_command_empty_slice() {
                     payload.write_u32::<LittleEndian>(t).unwrap();
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, payload),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), payload),
                     );
                 }
                 CMD_EXIT => {
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
                     );
                     break;
                 }
@@ -99,7 +99,7 @@ fn test_send_command_empty_slice() {
                     // Handle CMD_OPTIONS_RRQ (sync_timezone) and others
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
                     );
                 }
             }
@@ -156,80 +156,80 @@ fn test_send_command_stack_array_payloads() {
         let req = read_request(&mut stream);
         send_response(
             &mut stream,
-            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
         );
 
         // CMD_UNLOCK — payload should be exactly 4 bytes
         let req = read_request(&mut stream);
-        assert_eq!(req.command, CMD_UNLOCK);
+        assert_eq!(req.command(), CMD_UNLOCK);
         assert_eq!(
-            req.payload.len(),
+            req.payload().len(),
             4,
             "UNLOCK payload should be 4 bytes (stack array)"
         );
-        let value = byteorder::LittleEndian::read_u32(&req.payload);
+        let value = byteorder::LittleEndian::read_u32(req.payload());
         assert_eq!(value, 50, "unlock(5) should send 5*10=50");
         send_response(
             &mut stream,
-            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
         );
 
         // CMD_SET_TIME — payload should be exactly 4 bytes
         let req = read_request(&mut stream);
-        assert_eq!(req.command, CMD_SET_TIME);
+        assert_eq!(req.command(), CMD_SET_TIME);
         assert_eq!(
-            req.payload.len(),
+            req.payload().len(),
             4,
             "SET_TIME payload should be 4 bytes (stack array)"
         );
         send_response(
             &mut stream,
-            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
         );
 
         // CMD_DELETE_USER — payload should be exactly 2 bytes
         let req = read_request(&mut stream);
-        assert_eq!(req.command, CMD_DELETE_USER);
+        assert_eq!(req.command(), CMD_DELETE_USER);
         assert_eq!(
-            req.payload.len(),
+            req.payload().len(),
             2,
             "DELETE_USER payload should be 2 bytes (stack array)"
         );
-        let uid = byteorder::LittleEndian::read_u16(&req.payload);
+        let uid = byteorder::LittleEndian::read_u16(req.payload());
         assert_eq!(uid, 42);
         send_response(
             &mut stream,
-            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
         );
 
         // CMD_REFRESHDATA (from refresh_data called inside delete_user)
         let req = read_request(&mut stream);
-        assert_eq!(req.command, CMD_REFRESHDATA);
+        assert_eq!(req.command(), CMD_REFRESHDATA);
         send_response(
             &mut stream,
-            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
         );
 
         // CMD_REG_EVENT — payload should be exactly 4 bytes
         let req = read_request(&mut stream);
-        assert_eq!(req.command, CMD_REG_EVENT);
+        assert_eq!(req.command(), CMD_REG_EVENT);
         assert_eq!(
-            req.payload.len(),
+            req.payload().len(),
             4,
             "REG_EVENT payload should be 4 bytes (stack array)"
         );
-        let flags = byteorder::LittleEndian::read_u32(&req.payload);
+        let flags = byteorder::LittleEndian::read_u32(req.payload());
         assert_eq!(flags, EF_ATTLOG);
         send_response(
             &mut stream,
-            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
         );
 
         // CMD_EXIT
         let req = read_request(&mut stream);
         send_response(
             &mut stream,
-            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+            &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
         );
     });
 
@@ -267,7 +267,7 @@ fn test_buffer_commands_use_stack_arrays() {
         loop {
             let req = read_request(&mut stream);
 
-            match req.command {
+            match req.command() {
                 CMD_GET_FREE_SIZES => {
                     let mut bytes = Vec::new();
                     for i in 0..20 {
@@ -280,24 +280,24 @@ fn test_buffer_commands_use_stack_arrays() {
                     }
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, bytes),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), bytes),
                     );
                 }
                 _CMD_PREPARE_BUFFER => {
-                    prepare_buf_payload_len = Some(req.payload.len());
-                    assert_eq!(req.payload[0], 1, "First byte should be ZK6/8 flag = 1");
+                    prepare_buf_payload_len = Some(req.payload().len());
+                    assert_eq!(req.payload()[0], 1, "First byte should be ZK6/8 flag = 1");
 
                     let mut res_payload = vec![0u8; 5];
                     res_payload[0] = 1;
                     byteorder::LittleEndian::write_u32(&mut res_payload[1..5], 32);
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_PREPARE_DATA, session_id, req.reply_id, res_payload),
+                        &ZKPacket::new(CMD_PREPARE_DATA, session_id, req.reply_id(), res_payload),
                     );
                 }
                 _CMD_READ_BUFFER => {
-                    read_buf_payload_len = Some(req.payload.len());
-                    let start = byteorder::LittleEndian::read_i32(&req.payload[0..4]);
+                    read_buf_payload_len = Some(req.payload().len());
+                    let start = byteorder::LittleEndian::read_i32(&req.payload()[0..4]);
                     assert_eq!(start, 0, "Start offset should be 0");
 
                     // Send user data
@@ -314,20 +314,20 @@ fn test_buffer_commands_use_stack_arrays() {
                     data.write_u32::<LittleEndian>(1).unwrap();
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_DATA, session_id, req.reply_id, data),
+                        &ZKPacket::new(CMD_DATA, session_id, req.reply_id(), data),
                     );
                 }
                 CMD_EXIT => {
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
                     );
                     break;
                 }
                 _ => {
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
                     );
                 }
             }
@@ -351,7 +351,7 @@ fn test_buffer_commands_use_stack_arrays() {
 
     let users = zk.get_users().unwrap();
     assert_eq!(users.len(), 1);
-    assert_eq!(users[0].name, "TestUsr");
+    assert_eq!(users[0].name(), "TestUsr");
 
     zk.disconnect().unwrap();
     server.join().unwrap();
@@ -361,9 +361,9 @@ fn test_buffer_commands_use_stack_arrays() {
 #[test]
 fn test_encoding_is_static_str() {
     let zk = ZK::new("192.168.1.1", 4370);
-    assert_eq!(zk.encoding, "UTF-8");
+    assert_eq!(zk.encoding(), "UTF-8");
     // If this compiles, encoding is &'static str (not String)
-    let _: &'static str = zk.encoding;
+    let _: &'static str = zk.encoding();
 }
 
 /// Verifies pre-allocated Vecs: get_users/get_attendance produce correct results.
@@ -382,11 +382,11 @@ fn test_preallocated_results_correctness() {
         loop {
             let req = read_request(&mut stream);
 
-            match req.command {
+            match req.command() {
                 CMD_CONNECT => {
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
                     );
                 }
                 CMD_GET_FREE_SIZES => {
@@ -403,11 +403,11 @@ fn test_preallocated_results_correctness() {
                     }
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, bytes),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), bytes),
                     );
                 }
                 _CMD_PREPARE_BUFFER => {
-                    let cmd_in_buf = byteorder::LittleEndian::read_u16(&req.payload[1..3]);
+                    let cmd_in_buf = byteorder::LittleEndian::read_u16(&req.payload()[1..3]);
                     last_cmd = cmd_in_buf;
 
                     let size: u32 = if cmd_in_buf == CMD_USERTEMP_RRQ {
@@ -420,7 +420,7 @@ fn test_preallocated_results_correctness() {
                     byteorder::LittleEndian::write_u32(&mut res_payload[1..5], size);
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_PREPARE_DATA, session_id, req.reply_id, res_payload),
+                        &ZKPacket::new(CMD_PREPARE_DATA, session_id, req.reply_id(), res_payload),
                     );
                 }
                 _CMD_READ_BUFFER => {
@@ -452,26 +452,26 @@ fn test_preallocated_results_correctness() {
                     }
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_DATA, session_id, req.reply_id, data),
+                        &ZKPacket::new(CMD_DATA, session_id, req.reply_id(), data),
                     );
                 }
                 CMD_FREE_DATA => {
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
                     );
                 }
                 CMD_EXIT => {
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
                     );
                     break;
                 }
                 _ => {
                     send_response(
                         &mut stream,
-                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id, vec![]),
+                        &ZKPacket::new(CMD_ACK_OK, session_id, req.reply_id(), vec![]),
                     );
                 }
             }
@@ -484,11 +484,11 @@ fn test_preallocated_results_correctness() {
     // Verify users (should have capacity pre-allocated for 3)
     let users = zk.get_users().unwrap();
     assert_eq!(users.len(), 3, "Should return exactly 3 users");
-    assert_eq!(users[0].name, "User1");
-    assert_eq!(users[1].name, "User2");
-    assert_eq!(users[2].name, "User3");
-    assert_eq!(users[0].user_id, "100");
-    assert_eq!(users[2].user_id, "102");
+    assert_eq!(users[0].name(), "User1");
+    assert_eq!(users[1].name(), "User2");
+    assert_eq!(users[2].name(), "User3");
+    assert_eq!(users[0].user_id(), "100");
+    assert_eq!(users[2].user_id(), "102");
 
     // Verify attendance (should have capacity pre-allocated for 2)
     let logs = zk.get_attendance().unwrap();

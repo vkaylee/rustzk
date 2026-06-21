@@ -48,18 +48,42 @@ pub fn calculate_checksum(data: &[u8]) -> u16 {
 #[derive(Debug, Clone)]
 pub struct ZKPacket<'a> {
     /// The command code (e.g., CMD_CONNECT).
-    pub command: u16,
+    pub(crate) command: u16,
     /// The packet checksum.
-    pub checksum: u16,
+    pub(crate) checksum: u16,
     /// The session ID allocated by the device.
-    pub session_id: u16,
+    pub(crate) session_id: u16,
     /// The reply ID for tracking request-response pairs.
-    pub reply_id: u16,
+    pub(crate) reply_id: u16,
     /// The raw payload of the command.
-    pub payload: Cow<'a, [u8]>,
+    pub(crate) payload: Cow<'a, [u8]>,
 }
 
 impl<'a> ZKPacket<'a> {
+    /// Getter for command.
+    pub fn command(&self) -> u16 {
+        self.command
+    }
+
+    /// Getter for checksum.
+    pub fn checksum(&self) -> u16 {
+        self.checksum
+    }
+
+    /// Getter for session_id.
+    pub fn session_id(&self) -> u16 {
+        self.session_id
+    }
+
+    /// Getter for reply_id.
+    pub fn reply_id(&self) -> u16 {
+        self.reply_id
+    }
+
+    /// Getter for payload.
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
     /// Creates a new ZKPacket and automatically calculates the checksum
     /// using the **default** (Python pyzk-aligned) algorithm.
     ///

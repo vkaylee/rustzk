@@ -27,10 +27,10 @@ fn test_transport_cleaned_on_handshake_failure() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes(&body).unwrap();
-        assert_eq!(packet.command, CMD_CONNECT);
+        assert_eq!(packet.command(), CMD_CONNECT);
 
         // Send invalid response (not CMD_ACK_OK or CMD_ACK_UNAUTH)
-        let res = ZKPacket::new(CMD_ACK_ERROR, 0, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_ERROR, 0, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -67,15 +67,15 @@ fn test_transport_cleaned_on_handshake_failure() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, 5555, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, 5555, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, 5555, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, 5555, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                     break;
                 }
@@ -85,7 +85,7 @@ fn test_transport_cleaned_on_handshake_failure() {
     });
 
     // Reconnect to new server — should succeed since transport was cleaned
-    zk.addr = format!("127.0.0.1:{}", port2);
+    zk.set_addr(format!("127.0.0.1:{}", port2));
     let result = zk.connect(ZKProtocol::TCP);
     assert!(
         result.is_ok(),
@@ -123,8 +123,8 @@ fn test_restart_resets_state_on_error() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            if packet.command == CMD_CONNECT {
-                let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id, vec![]);
+            if packet.command() == CMD_CONNECT {
+                let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
                 stream
                     .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                     .unwrap();
@@ -138,7 +138,7 @@ fn test_restart_resets_state_on_error() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    zk.timeout = Duration::from_secs(2); // Short timeout for fast test
+    zk.set_timeout(Duration::from_secs(2)); // Short timeout for fast test
     zk.connect(ZKProtocol::TCP).expect("Connect should succeed");
     assert!(zk.is_connected());
 
@@ -179,8 +179,8 @@ fn test_poweroff_resets_state_on_error() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            if packet.command == CMD_CONNECT {
-                let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id, vec![]);
+            if packet.command() == CMD_CONNECT {
+                let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
                 stream
                     .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                     .unwrap();
@@ -191,7 +191,7 @@ fn test_poweroff_resets_state_on_error() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    zk.timeout = Duration::from_secs(2); // Short timeout for fast test
+    zk.set_timeout(Duration::from_secs(2)); // Short timeout for fast test
     zk.connect(ZKProtocol::TCP).expect("Connect should succeed");
     assert!(zk.is_connected());
 
@@ -249,17 +249,17 @@ fn test_auth_failure_resets_session_id() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
                     // Respond with CMD_ACK_UNAUTH (password required)
-                    let res = ZKPacket::new(CMD_ACK_UNAUTH, 9999, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_UNAUTH, 9999, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_AUTH => {
                     // Respond with CMD_ACK_UNAUTH (wrong password)
-                    let res = ZKPacket::new(CMD_ACK_UNAUTH, 9999, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_UNAUTH, 9999, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -301,7 +301,7 @@ fn test_auto_fallback_preserves_checksum_flag() {
                 let _ = stream.read_exact(&mut body);
                 if let Ok(packet) = ZKPacket::from_bytes(&body) {
                     // Send an error response
-                    let res = ZKPacket::new(CMD_ACK_ERROR, 0, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_ERROR, 0, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                 }
             }

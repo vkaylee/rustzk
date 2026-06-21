@@ -21,15 +21,15 @@ fn start_live_mock_server(listener: TcpListener, session_id: u16, scenario: &'st
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_REG_EVENT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -64,7 +64,7 @@ fn start_live_mock_server(listener: TcpListener, session_id: u16, scenario: &'st
                     let res = ZKPacket::new(
                         CMD_ACK_OK,
                         session_id,
-                        packet.reply_id,
+                        packet.reply_id(),
                         b"TZAdj=7\0".to_vec(),
                     );
                     stream
@@ -75,14 +75,14 @@ fn start_live_mock_server(listener: TcpListener, session_id: u16, scenario: &'st
                     // Client acknowledged the event
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                     break;
                 }
                 _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -101,15 +101,15 @@ fn test_live_events_10byte_mock() {
     start_live_mock_server(listener, 1234, "10byte");
 
     let mut zk = ZK::new("127.0.0.1", addr.port());
-    zk.timeout = Duration::from_millis(500);
+    zk.set_timeout(Duration::from_millis(500));
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let mut event_iter = zk.listen_events().unwrap();
     let event = event_iter.next().unwrap().unwrap();
 
-    assert_eq!(event.uid, 101);
-    assert_eq!(event.user_id, "101");
-    assert_eq!(event.timestamp.to_string(), "2026-02-20 10:30:00");
+    assert_eq!(event.uid(), 101);
+    assert_eq!(event.user_id(), "101");
+    assert_eq!(event.timestamp().to_string(), "2026-02-20 10:30:00");
 }
 
 #[test]
@@ -121,13 +121,13 @@ fn test_live_events_32byte_mock() {
     start_live_mock_server(listener, 4321, "32byte");
 
     let mut zk = ZK::new("127.0.0.1", addr.port());
-    zk.timeout = Duration::from_millis(500);
+    zk.set_timeout(Duration::from_millis(500));
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let mut event_iter = zk.listen_events().unwrap();
     let event = event_iter.next().unwrap().unwrap();
 
-    assert_eq!(event.user_id, "RUST-USER-001");
-    assert_eq!(event.status, 1);
-    assert_eq!(event.timestamp.to_string(), "2026-02-20 15:00:00");
+    assert_eq!(event.user_id(), "RUST-USER-001");
+    assert_eq!(event.status(), 1);
+    assert_eq!(event.timestamp().to_string(), "2026-02-20 15:00:00");
 }

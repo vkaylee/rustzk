@@ -25,9 +25,9 @@ fn test_request_response_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_CONNECT);
+        assert_eq!(packet.command(), CMD_CONNECT);
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -38,11 +38,11 @@ fn test_request_response_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        assert_eq!(packet.command(), CMD_OPTIONS_RRQ);
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             b"TZAdj=7\0".to_vec(),
         );
         stream
@@ -55,7 +55,7 @@ fn test_request_response_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        let expected_reply_id = packet.reply_id;
+        let expected_reply_id = packet.reply_id();
 
         // MOCK MISALIGNMENT: Send a STALE packet first with an old reply_id
         let stale_res = ZKPacket::new(
@@ -107,9 +107,9 @@ fn test_receive_chunk_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_CONNECT);
+        assert_eq!(packet.command(), CMD_CONNECT);
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -120,12 +120,12 @@ fn test_receive_chunk_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_GET_FREE_SIZES);
+        assert_eq!(packet.command(), CMD_GET_FREE_SIZES);
 
         let mut sizes_payload = vec![0u8; 92];
         // self.users is at fields[4] which is offset 16..20 (4*4)
         LittleEndian::write_i32(&mut sizes_payload[16..20], 1);
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, sizes_payload);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), sizes_payload);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -136,11 +136,11 @@ fn test_receive_chunk_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        assert_eq!(packet.command(), CMD_OPTIONS_RRQ);
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             b"TZAdj=7\0".to_vec(),
         );
         stream
@@ -153,7 +153,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, _CMD_PREPARE_BUFFER);
+        assert_eq!(packet.command(), _CMD_PREPARE_BUFFER);
 
         // Send CMD_PREPARE_DATA with size 28 (one user)
         let mut prepare_payload = Vec::new();
@@ -161,7 +161,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let res = ZKPacket::new(
             CMD_PREPARE_DATA,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             prepare_payload,
         );
         stream
@@ -174,7 +174,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, _CMD_READ_BUFFER);
+        assert_eq!(packet.command(), _CMD_READ_BUFFER);
 
         // Send CMD_PREPARE_DATA for the chunk
         let mut chunk_prepare_payload = Vec::new();
@@ -182,7 +182,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let res = ZKPacket::new(
             CMD_PREPARE_DATA,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             chunk_prepare_payload,
         );
         stream
@@ -194,7 +194,7 @@ fn test_receive_chunk_misalignment_tcp() {
         let mut stale_data = Vec::new();
         stale_data.write_u32::<LittleEndian>(28).unwrap(); // size of data following
         stale_data.extend_from_slice(&[0xEE; 28]);
-        let stale_res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id - 1, stale_data);
+        let stale_res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id() - 1, stale_data);
         stream
             .write_all(&TCPWrapper::wrap(&stale_res.to_bytes()))
             .unwrap();
@@ -214,7 +214,7 @@ fn test_receive_chunk_misalignment_tcp() {
         correct_data.write_u16::<LittleEndian>(0).unwrap(); // tz
         correct_data.write_u32::<LittleEndian>(100).unwrap(); // user_id
 
-        let correct_res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, correct_data);
+        let correct_res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), correct_data);
         stream
             .write_all(&TCPWrapper::wrap(&correct_res.to_bytes()))
             .unwrap();
@@ -226,9 +226,9 @@ fn test_receive_chunk_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_FREE_DATA);
+        assert_eq!(packet.command(), CMD_FREE_DATA);
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -240,8 +240,8 @@ fn test_receive_chunk_misalignment_tcp() {
 
     let users = zk.get_users().unwrap();
     assert_eq!(users.len(), 1);
-    assert_eq!(users[0].name, "TestUser");
-    assert_eq!(users[0].user_id, "100");
+    assert_eq!(users[0].name(), "TestUser");
+    assert_eq!(users[0].user_id(), "100");
 
     server_handle.join().unwrap();
 }
@@ -264,9 +264,9 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_CONNECT);
+        assert_eq!(packet.command(), CMD_CONNECT);
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -277,11 +277,11 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_GET_FREE_SIZES);
+        assert_eq!(packet.command(), CMD_GET_FREE_SIZES);
 
         let mut sizes_payload = vec![0u8; 92];
         LittleEndian::write_i32(&mut sizes_payload[16..20], 1);
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, sizes_payload);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), sizes_payload);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -292,11 +292,11 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        assert_eq!(packet.command(), CMD_OPTIONS_RRQ);
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             b"TZAdj=7\0".to_vec(),
         );
         stream
@@ -309,7 +309,7 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, _CMD_PREPARE_BUFFER);
+        assert_eq!(packet.command(), _CMD_PREPARE_BUFFER);
 
         // Send CMD_PREPARE_DATA with size 28 (one user) + trailing garbage (0xAB)
         // This will simulate the payload offset misalignment issue.
@@ -320,7 +320,7 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         let res = ZKPacket::new(
             CMD_PREPARE_DATA,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             prepare_payload,
         );
         stream
@@ -333,7 +333,7 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, _CMD_READ_BUFFER);
+        assert_eq!(packet.command(), _CMD_READ_BUFFER);
 
         // Send CMD_PREPARE_DATA for the chunk
         let mut chunk_prepare_payload = Vec::new();
@@ -341,7 +341,7 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         let res = ZKPacket::new(
             CMD_PREPARE_DATA,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             chunk_prepare_payload,
         );
         stream
@@ -362,7 +362,7 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         correct_data.write_u16::<LittleEndian>(0).unwrap(); // tz
         correct_data.write_u32::<LittleEndian>(100).unwrap(); // user_id
 
-        let correct_res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, correct_data);
+        let correct_res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), correct_data);
         stream
             .write_all(&TCPWrapper::wrap(&correct_res.to_bytes()))
             .unwrap();
@@ -374,9 +374,9 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_FREE_DATA);
+        assert_eq!(packet.command(), CMD_FREE_DATA);
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -388,8 +388,8 @@ fn test_prepare_buffer_offset_misalignment_tcp() {
 
     let users = zk.get_users().unwrap();
     assert_eq!(users.len(), 1);
-    assert_eq!(users[0].name, "TestUser");
-    assert_eq!(users[0].user_id, "100");
+    assert_eq!(users[0].name(), "TestUser");
+    assert_eq!(users[0].user_id(), "100");
 
     server_handle.join().unwrap();
 }

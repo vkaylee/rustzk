@@ -32,15 +32,15 @@ fn send_packet(stream: &mut std::net::TcpStream, packet: &ZKPacket) {
 /// Helper: handle CMD_CONNECT and return session_id
 fn handle_connect(stream: &mut std::net::TcpStream, session_id: u16) {
     let packet = read_one_packet(stream);
-    assert_eq!(packet.command, CMD_CONNECT);
-    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+    assert_eq!(packet.command(), CMD_CONNECT);
+    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
     send_packet(stream, &res);
 }
 
 /// Helper: handle any packet with ACK_OK
 fn handle_ack(stream: &mut std::net::TcpStream, session_id: u16) {
     let packet = read_one_packet(stream);
-    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
     send_packet(stream, &res);
 }
 
@@ -53,7 +53,7 @@ fn handle_get_free_sizes(
     records: i32,
 ) {
     let packet = read_one_packet(stream);
-    assert_eq!(packet.command, CMD_GET_FREE_SIZES);
+    assert_eq!(packet.command(), CMD_GET_FREE_SIZES);
     let mut bytes = vec![0u8; 92];
     // fields[4] = users at offset 16
     <LittleEndian as ByteOrder>::write_i32(&mut bytes[16..20], users);
@@ -63,18 +63,18 @@ fn handle_get_free_sizes(
     <LittleEndian as ByteOrder>::write_i32(&mut bytes[32..36], records);
     // faces at offset 80 (first 4 bytes of the 80..92 range)
     <LittleEndian as ByteOrder>::write_i32(&mut bytes[80..84], -5);
-    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, bytes);
+    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
     send_packet(stream, &res);
 }
 
 /// Helper: handle TZAdj sync
 fn handle_tzadj(stream: &mut std::net::TcpStream, session_id: u16) {
     let packet = read_one_packet(stream);
-    assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+    assert_eq!(packet.command(), CMD_OPTIONS_RRQ);
     let res = ZKPacket::new(
         CMD_ACK_OK,
         session_id,
-        packet.reply_id,
+        packet.reply_id(),
         b"TZAdj=7\0".to_vec(),
     );
     send_packet(stream, &res);
@@ -101,23 +101,23 @@ fn test_negative_template_total_size() {
 
         // _CMD_PREPARE_BUFFER for template read
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_PREPARE_BUFFER);
+        assert_eq!(packet.command(), _CMD_PREPARE_BUFFER);
         let mut res_payload = vec![0u8; 5];
         res_payload[0] = 1;
         // Total size including 4-byte header: size = 8 (4 header + 4 template data)
         <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 8);
-        let res = ZKPacket::new(CMD_PREPARE_DATA, sid, packet.reply_id, res_payload);
+        let res = ZKPacket::new(CMD_PREPARE_DATA, sid, packet.reply_id(), res_payload);
         send_packet(&mut stream, &res);
 
         // _CMD_READ_BUFFER
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_READ_BUFFER);
+        assert_eq!(packet.command(), _CMD_READ_BUFFER);
 
         // Send CMD_DATA with a NEGATIVE i32 as total_size
         let mut data = Vec::new();
         data.write_i32::<LittleEndian>(-1).unwrap(); // Negative total_size!
         data.extend_from_slice(&[0xAA; 4]); // Some junk data
-        let res = ZKPacket::new(CMD_DATA, sid, packet.reply_id, data);
+        let res = ZKPacket::new(CMD_DATA, sid, packet.reply_id(), data);
         send_packet(&mut stream, &res);
 
         // Handle CMD_FREE_DATA
@@ -196,22 +196,22 @@ fn test_zero_total_size_with_nonzero_users() {
 
         // _CMD_PREPARE_BUFFER
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_PREPARE_BUFFER);
+        assert_eq!(packet.command(), _CMD_PREPARE_BUFFER);
         let mut res_payload = vec![0u8; 5];
         res_payload[0] = 1;
         // 4 bytes for total_size header only
         <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 4);
-        let res = ZKPacket::new(CMD_PREPARE_DATA, sid, packet.reply_id, res_payload);
+        let res = ZKPacket::new(CMD_PREPARE_DATA, sid, packet.reply_id(), res_payload);
         send_packet(&mut stream, &res);
 
         // _CMD_READ_BUFFER
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_READ_BUFFER);
+        assert_eq!(packet.command(), _CMD_READ_BUFFER);
 
         // Send CMD_DATA with total_size = 0 (but device claimed 5 users)
         let mut data = Vec::new();
         data.write_u32::<LittleEndian>(0).unwrap(); // total_size = 0
-        let res = ZKPacket::new(CMD_DATA, sid, packet.reply_id, data);
+        let res = ZKPacket::new(CMD_DATA, sid, packet.reply_id(), data);
         send_packet(&mut stream, &res);
 
         // CMD_FREE_DATA
@@ -249,22 +249,22 @@ fn test_oversized_total_size_rejected() {
 
         // _CMD_PREPARE_BUFFER
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_PREPARE_BUFFER);
+        assert_eq!(packet.command(), _CMD_PREPARE_BUFFER);
         let mut res_payload = vec![0u8; 5];
         res_payload[0] = 1;
         <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 8);
-        let res = ZKPacket::new(CMD_PREPARE_DATA, sid, packet.reply_id, res_payload);
+        let res = ZKPacket::new(CMD_PREPARE_DATA, sid, packet.reply_id(), res_payload);
         send_packet(&mut stream, &res);
 
         // _CMD_READ_BUFFER
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_READ_BUFFER);
+        assert_eq!(packet.command(), _CMD_READ_BUFFER);
 
         // Send CMD_DATA with total_size = 0xFFFFFFFF (4GB!)
         let mut data = Vec::new();
         data.write_u32::<LittleEndian>(0xFFFFFFFF).unwrap(); // Absurdly large
         data.extend_from_slice(&[0x00; 4]); // Some padding
-        let res = ZKPacket::new(CMD_DATA, sid, packet.reply_id, data);
+        let res = ZKPacket::new(CMD_DATA, sid, packet.reply_id(), data);
         send_packet(&mut stream, &res);
 
         // CMD_FREE_DATA
@@ -306,23 +306,23 @@ fn test_oversized_template_total_size_rejected() {
 
         // _CMD_PREPARE_BUFFER
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_PREPARE_BUFFER);
+        assert_eq!(packet.command(), _CMD_PREPARE_BUFFER);
         let mut res_payload = vec![0u8; 5];
         res_payload[0] = 1;
         <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 8);
-        let res = ZKPacket::new(CMD_PREPARE_DATA, sid, packet.reply_id, res_payload);
+        let res = ZKPacket::new(CMD_PREPARE_DATA, sid, packet.reply_id(), res_payload);
         send_packet(&mut stream, &res);
 
         // _CMD_READ_BUFFER
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_READ_BUFFER);
+        assert_eq!(packet.command(), _CMD_READ_BUFFER);
 
         // Send CMD_DATA with total_size = MAX_RESPONSE_SIZE + 1 (over limit)
         let mut data = Vec::new();
         data.write_i32::<LittleEndian>((MAX_RESPONSE_SIZE + 1) as i32)
             .unwrap();
         data.extend_from_slice(&[0xBB; 4]);
-        let res = ZKPacket::new(CMD_DATA, sid, packet.reply_id, data);
+        let res = ZKPacket::new(CMD_DATA, sid, packet.reply_id(), data);
         send_packet(&mut stream, &res);
 
         // CMD_FREE_DATA
@@ -367,11 +367,11 @@ fn test_zero_size_buffer_response() {
 
         // _CMD_PREPARE_BUFFER — return size = 0
         let packet = read_one_packet(&mut stream);
-        assert_eq!(packet.command, _CMD_PREPARE_BUFFER);
+        assert_eq!(packet.command(), _CMD_PREPARE_BUFFER);
         let mut res_payload = vec![0u8; 5];
         res_payload[0] = 1;
         <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 0); // Zero size!
-        let res = ZKPacket::new(CMD_ACK_OK, sid, packet.reply_id, res_payload);
+        let res = ZKPacket::new(CMD_ACK_OK, sid, packet.reply_id(), res_payload);
         send_packet(&mut stream, &res);
 
         // CMD_FREE_DATA (sent by the zero-size guard)

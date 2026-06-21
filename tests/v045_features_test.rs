@@ -27,16 +27,16 @@ fn test_get_option_and_timezone_mock() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
                     session_id = 5566;
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_OPTIONS_RRQ => {
-                    let key = String::from_utf8_lossy(&packet.payload)
+                    let key = String::from_utf8_lossy(packet.payload())
                         .trim_matches('\0')
                         .to_string();
                     let response_str = match key.as_str() {
@@ -48,7 +48,7 @@ fn test_get_option_and_timezone_mock() {
                     let res = ZKPacket::new(
                         CMD_ACK_OK,
                         session_id,
-                        packet.reply_id,
+                        packet.reply_id(),
                         response_str.as_bytes().to_vec(),
                     );
                     stream
@@ -56,14 +56,14 @@ fn test_get_option_and_timezone_mock() {
                         .unwrap();
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                     break;
                 }
                 _ => {
-                    let res = ZKPacket::new(CMD_ACK_UNKNOWN, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_UNKNOWN, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -108,10 +108,10 @@ fn test_attendance_heuristic_40bytes_mock() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
                     session_id = 7788;
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -122,7 +122,7 @@ fn test_attendance_heuristic_40bytes_mock() {
                         let val = if i == 8 { 1 } else { 0 }; // Report 1 record
                         bytes.write_i32::<LittleEndian>(val).unwrap();
                     }
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, bytes);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -134,7 +134,7 @@ fn test_attendance_heuristic_40bytes_mock() {
                     LittleEndian::write_u32(&mut res_payload[1..5], 44);
 
                     let res =
-                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id(), res_payload);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -153,7 +153,7 @@ fn test_attendance_heuristic_40bytes_mock() {
                     data.push(0); // Punch
                     data.write_all(&[0u8; 8]).unwrap(); // Padding to reach 40 bytes
 
-                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, data);
+                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), data);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -162,7 +162,7 @@ fn test_attendance_heuristic_40bytes_mock() {
                     break;
                 }
                 _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -176,8 +176,8 @@ fn test_attendance_heuristic_40bytes_mock() {
 
     let logs = zk.get_attendance().unwrap();
     assert_eq!(logs.len(), 1);
-    assert_eq!(logs[0].user_id, "101");
-    assert_eq!(logs[0].uid, 10);
+    assert_eq!(logs[0].user_id(), "101");
+    assert_eq!(logs[0].uid(), 10);
 
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
