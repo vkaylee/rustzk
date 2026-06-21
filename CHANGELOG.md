@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0] - 2026-06-21
+### Added
+- **Connection Stress Tests**: Added 6 connection stress testing scenarios to ensure network resilience.
+
+### Fixed
+- **Buffer Size Misalignment Fallback**: Implemented a self-healing fallback parser for buffer size misalignment.
+- **Stress Test Flakiness**: Resolved race condition in environment variables causing flaky stress tests.
+
+### Changed
+- **Encapsulated Struct Fields**: Encapsulated internal struct fields and optimized network buffers.
+- **Enterprise-Grade Clippy Configuration**: Elevated Clippy configuration to enterprise standards and refactored `expect()` usage to use structured domain errors.
+
 ## [0.4.10] - 2026-03-06
 ### Fixed
 - **Auto Fallback Checksum State**: `connect(ZKProtocol::Auto)` now preserves the `use_legacy_checksum` flag when TCP fails and falls back to UDP, preventing unnecessary 5–10s latency from starting UDP handshake with a wrong checksum.
