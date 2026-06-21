@@ -602,3 +602,143 @@ fn test_set_users_bulk_mock() {
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
 }
+
+#[test]
+fn test_user_id_cache_invalidation_and_timezone_redundancy() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let _ = env_logger::builder().is_test(true).try_init();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    let get_option_count = Arc::new(AtomicUsize::new(0));
+    let get_option_count_clone = Arc::clone(&get_option_count);
+
+    let server_handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let session_id = 5555;
+
+        loop {
+            let mut header = [0u8; 8];
+            if stream.read_exact(&mut header).is_err() {
+                break;
+            }
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            stream.read_exact(&mut body).unwrap();
+            let packet = ZKPacket::from_bytes_owned(body).unwrap();
+
+            match packet.command() {
+                CMD_CONNECT => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_GET_FREE_SIZES => {
+                    let bytes = vec![0u8; 80];
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                _CMD_PREPARE_BUFFER => {
+                    let mut res_payload = vec![0u8; 5];
+                    res_payload[0] = 1;
+                    <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 4);
+                    let res =
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id(), res_payload);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                _CMD_READ_BUFFER => {
+                    let mut data = Vec::new();
+                    data.write_i32::<LittleEndian>(0).unwrap();
+                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), data);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_USER_WRQ => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_DELETE_USER => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_REFRESHDATA => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_OPTIONS_RRQ => {
+                    get_option_count_clone.fetch_add(1, Ordering::SeqCst);
+                    let res = ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id(), vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_GET_TIME => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![0, 0, 0, 0]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+                CMD_EXIT => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                    break;
+                }
+                _ => {
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    stream
+                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+                        .unwrap();
+                }
+            }
+        }
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+
+    let user = User::new(
+        1,
+        "User 1".to_string(),
+        USER_DEFAULT,
+        "".to_string(),
+        "1".to_string(),
+        "101".to_string(),
+        0,
+    );
+    zk.set_user(&user).unwrap();
+
+    assert!(zk.is_connected());
+
+    // Trigger get_time which queries timezone
+    let _ = zk.get_time();
+    assert!(zk.timezone_synced());
+
+    // Call read_sizes which also triggers timezone sync (but it should be skipped as it is already marked synced)
+    let _ = zk.read_sizes();
+
+    // Verify option query was only sent exactly once
+    assert_eq!(get_option_count.load(Ordering::SeqCst), 1);
+
+    // Delete user 1
+    zk.delete_user(1).unwrap();
+
+    zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}

@@ -287,6 +287,8 @@ impl ZK {
     fn perform_connect_handshake(&mut self) -> ZKResult<()> {
         self.session_id = 0;
         self.reply_id = USHRT_MAX - 1;
+        self.timezone_synced = false;
+        self.timezone_offset = 0;
 
         // Use a short timeout for handshake probes (5s each) so auto-fallback
         // completes in ~10s max instead of waiting the full user-configured timeout.
@@ -409,10 +411,12 @@ impl ZK {
             return Ok(());
         }
 
+        // Mark as synced immediately to prevent repeated queries on failure
+        self.timezone_synced = true;
+
         if let Ok(tz_str) = self.get_option_value("TZAdj") {
             if let Ok(tz_val) = tz_str.parse::<i32>() {
                 self.timezone_offset = tz_val * 60; // Convert hours to minutes
-                self.timezone_synced = true;
             }
         }
         Ok(())
@@ -692,19 +696,54 @@ impl ZK {
     }
 
     fn read_chunk_into(&mut self, start: i32, size: i32, data: &mut Vec<u8>) -> ZKResult<()> {
+        let is_udp = match &self.transport {
+            Some(ZKTransport::Udp(_)) => true,
+            _ => false,
+        };
+
         let mut payload = [0u8; 8];
         byteorder::LittleEndian::write_i32(&mut payload[0..4], start);
         byteorder::LittleEndian::write_i32(&mut payload[4..8], size);
 
-        let res = self.send_command(_CMD_READ_BUFFER, &payload)?;
-        if res.command == CMD_ACK_OK {
-            // If we get ACK for read chunk, it means data is coming next.
-            // Wait for the actual data packet.
-            let data_packet = self.read_response_safe()?;
-            self.receive_chunk_into(data_packet, data)
-        } else {
-            self.receive_chunk_into(res, data)
+        let max_attempts = if is_udp { 3 } else { 1 };
+        let mut last_error = None;
+
+        for attempt in 1..=max_attempts {
+            let res = self.send_command(_CMD_READ_BUFFER, &payload);
+            match res {
+                Ok(res_packet) => {
+                    let receive_res = if res_packet.command == CMD_ACK_OK {
+                        // If we get ACK for read chunk, it means data is coming next.
+                        // Wait for the actual data packet.
+                        match self.read_response_safe() {
+                            Ok(data_packet) => self.receive_chunk_into(data_packet, data),
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        self.receive_chunk_into(res_packet, data)
+                    };
+
+                    match receive_res {
+                        Ok(()) => return Ok(()),
+                        Err(e) => {
+                            log::warn!("UDP chunk receive failed on attempt {}: {:?}", attempt, e);
+                            last_error = Some(e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("UDP chunk request failed on attempt {}: {:?}", attempt, e);
+                    last_error = Some(e);
+                }
+            }
+
+            if attempt < max_attempts {
+                // Short wait before retry (exponential backoff)
+                std::thread::sleep(std::time::Duration::from_millis(attempt as u64 * 100));
+            }
         }
+
+        Err(last_error.unwrap_or_else(|| ZKError::Response("Chunk read failed".into())))
     }
 
     fn read_with_buffer(&mut self, command: u16, fct: u8, ext: u32) -> ZKResult<Vec<u8>> {
@@ -1241,14 +1280,18 @@ impl ZK {
     /// Ensures User ID uniqueness to prevent logic conflicts.
     /// **Performance Note:** This performs an O(N) fetch of all users first. For bulk operations, use `set_user_unchecked`.
     pub fn set_user(&mut self, user: &User) -> ZKResult<()> {
-        // 1. Safety Check: Ensure this User ID doesn't already exist under a DIFFERENT UID.
+        // 1. Ensure cache is loaded
+        if self.user_id_cache.is_none() {
+            self.refresh_user_cache()?;
+        }
+
+        // 2. Safety Check: Ensure this User ID doesn't already exist under a DIFFERENT UID.
         // If it exists under the SAME UID, it's an update, which is allowed.
-        let existing_users = self.get_users()?;
-        if let Some(existing) = existing_users.iter().find(|u| u.user_id == user.user_id) {
-            if existing.uid != user.uid {
+        if let Some(ref cache) = self.user_id_cache {
+            if let Some((&existing_uid, _)) = cache.iter().find(|(&uid, id)| *id == &user.user_id && uid != user.uid) {
                 return Err(ZKError::Response(format!(
                     "Conflict: User ID '{}' already exists on the device at UID {}",
-                    user.user_id, existing.uid
+                    user.user_id, existing_uid
                 )));
             }
         }
@@ -1264,26 +1307,25 @@ impl ZK {
             return Ok(());
         }
 
-        // 1. Fetch existing users once to build a conflict map
-        let existing_users = self.get_users()?;
-        let mut user_id_to_uid: HashMap<String, u16> = existing_users
-            .into_iter()
-            .map(|u| (u.user_id, u.uid))
-            .collect();
+        // 1. Ensure cache is loaded
+        if self.user_id_cache.is_none() {
+            self.refresh_user_cache()?;
+        }
 
-        // 2. Perform uniqueness checks for the entire batch
-        for user in users {
-            if let Some(&existing_uid) = user_id_to_uid.get(&user.user_id) {
-                if existing_uid != user.uid {
+        // 2. Perform uniqueness checks for the entire batch using local cache
+        if let Some(ref mut cache) = self.user_id_cache {
+            for user in users {
+                if let Some((&existing_uid, _)) = cache.iter().find(|(&uid, id)| *id == &user.user_id && uid != user.uid) {
                     return Err(ZKError::Response(format!(
                         "Conflict in batch: User ID '{}' already exists on device at UID {}",
                         user.user_id, existing_uid
                     )));
                 }
-            }
 
-            // Update local map to reflect the new state for subsequent users in the batch
-            user_id_to_uid.insert(user.user_id.clone(), user.uid);
+                // Update the local cache to reflect the state for subsequent users in the batch
+                cache.retain(|&uid, id| uid == user.uid || id != &user.user_id);
+                cache.insert(user.uid, user.user_id.clone());
+            }
         }
 
         // 3. Send all users without individual refreshes
@@ -1368,6 +1410,11 @@ impl ZK {
 
         let res = self.send_command(CMD_USER_WRQ, &payload)?;
         if res.command == CMD_ACK_OK {
+            // Update the local cache to match the new mapping
+            if let Some(ref mut cache) = self.user_id_cache {
+                cache.retain(|&uid, id| uid == user.uid || id != &user.user_id);
+                cache.insert(user.uid, user.user_id.clone());
+            }
             Ok(())
         } else {
             Err(ZKError::Response("Failed to set user".into()))
@@ -1381,6 +1428,10 @@ impl ZK {
 
         let res = self.send_command(CMD_DELETE_USER, &payload)?;
         if res.command == CMD_ACK_OK {
+            // Remove the deleted user mapping from cache
+            if let Some(ref mut cache) = self.user_id_cache {
+                cache.remove(&uid);
+            }
             let _ = self.refresh_data();
             Ok(())
         } else {
@@ -1510,73 +1561,85 @@ impl ZK {
         self.reg_event(EF_ATTLOG)?;
 
         Ok(std::iter::from_fn(move || {
-            match self.read_packet() {
-                Ok(packet) => {
-                    // Send ACK_OK back to device to acknowledge receipt
-                    let _ = self.send_ack_ok();
+            loop {
+                match self.read_packet() {
+                    Ok(packet) => {
+                        // Send ACK_OK back to device to acknowledge receipt
+                        let _ = self.send_ack_ok();
 
-                    if packet.command != CMD_REG_EVENT {
-                        return Some(Err(ZKError::Response(format!(
-                            "Unexpected command during event listening: {}",
-                            packet.command
-                        ))));
-                    }
-
-                    let data = &packet.payload;
-                    if data.is_empty() {
-                        return None; // Or some signal to continue
-                    }
-
-                    // Decode event data based on length (matching pyzk logic)
-                    let (uid, user_id, status, punch, timestamp) =
-                        if data.len() == EVENT_DATA_LEN_10 {
-                            let uid = LittleEndian::read_u16(&data[0..2]) as u32;
-                            let status = data[2];
-                            let punch = data[3];
-                            let timehex = &data[4..10];
-                            let ts = ZK::decode_timehex(timehex).ok()?;
-                            (uid, uid.to_string(), status, punch, ts)
-                        } else if data.len() == EVENT_DATA_LEN_12 {
-                            let user_id_num = LittleEndian::read_u32(&data[0..4]);
-                            let status = data[4];
-                            let punch = data[5];
-                            let timehex = &data[6..12];
-                            let ts = ZK::decode_timehex(timehex).ok()?;
-                            (user_id_num, user_id_num.to_string(), status, punch, ts)
-                        } else if data.len() >= EVENT_DATA_LEN_32 {
-                            // User ID is string (24 bytes)
-                            let user_id = String::from_utf8_lossy(&data[0..24])
-                                .trim_matches('\0')
-                                .to_string();
-                            let status = data[24];
-                            let punch = data[25];
-                            let timehex = &data[26..32];
-                            let ts = ZK::decode_timehex(timehex).ok()?;
-                            (0, user_id, status, punch, ts) // UID might be 0 for string-based IDs
-                        } else {
-                            return Some(Err(ZKError::InvalidData(format!(
-                                "Unknown event data length: {}",
-                                data.len()
+                        if packet.command != CMD_REG_EVENT {
+                            return Some(Err(ZKError::Response(format!(
+                                "Unexpected command during event listening: {}",
+                                packet.command
                             ))));
-                        };
+                        }
 
-                    Some(Ok(Attendance {
-                        uid,
-                        user_id,
-                        timestamp,
-                        status,
-                        punch,
-                        timezone_offset: self.timezone_offset,
-                    }))
+                        let data = &packet.payload;
+                        if data.is_empty() {
+                            continue;
+                        }
+
+                        // Decode event data based on length (matching pyzk logic)
+                        let (uid, user_id, status, punch, timestamp) =
+                            if data.len() == EVENT_DATA_LEN_10 {
+                                let uid = LittleEndian::read_u16(&data[0..2]) as u32;
+                                let status = data[2];
+                                let punch = data[3];
+                                let timehex = &data[4..10];
+                                let ts = match ZK::decode_timehex(timehex) {
+                                    Ok(ts) => ts,
+                                    Err(e) => return Some(Err(e)),
+                                };
+                                (uid, uid.to_string(), status, punch, ts)
+                            } else if data.len() == EVENT_DATA_LEN_12 {
+                                let user_id_num = LittleEndian::read_u32(&data[0..4]);
+                                let status = data[4];
+                                let punch = data[5];
+                                let timehex = &data[6..12];
+                                let ts = match ZK::decode_timehex(timehex) {
+                                    Ok(ts) => ts,
+                                    Err(e) => return Some(Err(e)),
+                                };
+                                (user_id_num, user_id_num.to_string(), status, punch, ts)
+                            } else if data.len() >= EVENT_DATA_LEN_32 {
+                                // User ID is string (24 bytes)
+                                let user_id = String::from_utf8_lossy(&data[0..24])
+                                    .trim_matches('\0')
+                                    .to_string();
+                                let status = data[24];
+                                let punch = data[25];
+                                let timehex = &data[26..32];
+                                let ts = match ZK::decode_timehex(timehex) {
+                                    Ok(ts) => ts,
+                                    Err(e) => return Some(Err(e)),
+                                };
+                                (0, user_id, status, punch, ts) // UID might be 0 for string-based IDs
+                            } else {
+                                return Some(Err(ZKError::InvalidData(format!(
+                                    "Unknown event data length: {}",
+                                    data.len()
+                                ))));
+                            };
+
+                        return Some(Ok(Attendance {
+                            uid,
+                            user_id,
+                            timestamp,
+                            status,
+                            punch,
+                            timezone_offset: self.timezone_offset,
+                        }));
+                    }
+                    Err(ZKError::Network(ref e))
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            || e.kind() == std::io::ErrorKind::TimedOut =>
+                    {
+                        // This is expected during idle listening.
+                        // Continue looping to wait for the next event.
+                        continue;
+                    }
+                    Err(e) => return Some(Err(e)),
                 }
-                Err(ZKError::Network(ref e))
-                    if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                    // This is expected during idle listening
-                    None
-                }
-                Err(e) => Some(Err(e)),
             }
         }))
     }
