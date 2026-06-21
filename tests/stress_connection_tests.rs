@@ -73,14 +73,14 @@ fn spawn_reusable_mock_server(
                     None => break,
                 };
 
-                match packet.command {
+                match packet.command() {
                     CMD_CONNECT => {
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         send_response(&mut stream, &res);
                     }
                     CMD_GET_FREE_SIZES => {
                         let payload = build_sizes_payload(1, 1);
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, payload);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), payload);
                         send_response(&mut stream, &res);
                     }
                     CMD_OPTIONS_RRQ => {
@@ -88,19 +88,19 @@ fn spawn_reusable_mock_server(
                         let res = ZKPacket::new(
                             CMD_ACK_OK,
                             session_id,
-                            packet.reply_id,
+                            packet.reply_id(),
                             b"TZAdj=7\0".to_vec(),
                         );
                         send_response(&mut stream, &res);
                     }
                     CMD_EXIT => {
                         exit_counter.fetch_add(1, Ordering::SeqCst);
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         send_response(&mut stream, &res);
                         break;
                     }
                     _ => {
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         send_response(&mut stream, &res);
                     }
                 }
@@ -129,28 +129,28 @@ fn spawn_data_mock_server(
                     None => break,
                 };
 
-                match packet.command {
+                match packet.command() {
                     CMD_CONNECT => {
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         send_response(&mut stream, &res);
                     }
                     CMD_GET_FREE_SIZES => {
                         let payload = build_sizes_payload(5, 0);
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, payload);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), payload);
                         send_response(&mut stream, &res);
                     }
                     CMD_OPTIONS_RRQ => {
                         let res = ZKPacket::new(
                             CMD_ACK_OK,
                             session_id,
-                            packet.reply_id,
+                            packet.reply_id(),
                             b"TZAdj=7\0".to_vec(),
                         );
                         send_response(&mut stream, &res);
                     }
                     _CMD_PREPARE_BUFFER => {
-                        if packet.payload.len() >= 3 {
-                            last_prepared_cmd = LittleEndian::read_u16(&packet.payload[1..3]);
+                        if packet.payload().len() >= 3 {
+                            last_prepared_cmd = LittleEndian::read_u16(&packet.payload()[1..3]);
                         }
                         // 5 users × 28 bytes each + 4 byte size prefix = 144
                         let total_size: u32 = if last_prepared_cmd == CMD_USERTEMP_RRQ {
@@ -164,7 +164,7 @@ fn spawn_data_mock_server(
                         let res = ZKPacket::new(
                             CMD_PREPARE_DATA,
                             session_id,
-                            packet.reply_id,
+                            packet.reply_id(),
                             res_payload,
                         );
                         send_response(&mut stream, &res);
@@ -190,20 +190,20 @@ fn spawn_data_mock_server(
                         } else {
                             data.write_u32::<LittleEndian>(0).unwrap();
                         }
-                        let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, data);
+                        let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), data);
                         send_response(&mut stream, &res);
                     }
                     CMD_FREE_DATA => {
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         send_response(&mut stream, &res);
                     }
                     CMD_EXIT => {
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         send_response(&mut stream, &res);
                         break;
                     }
                     _ => {
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         send_response(&mut stream, &res);
                     }
                 }
@@ -368,9 +368,10 @@ fn stress_connect_with_data_operations() {
             .get_users()
             .unwrap_or_else(|e| panic!("Cycle {}: get_users failed: {}", i, e));
         assert_eq!(users.len(), 5, "Cycle {}: should parse 5 users", i);
-        assert_eq!(users[0].name, "User1", "Cycle {}: first user name", i);
+        assert_eq!(users[0].name(), "User1", "Cycle {}: first user name", i);
         assert_eq!(
-            users[4].user_id, "105",
+            users[4].user_id(),
+            "105",
             "Cycle {}: last user_id should be 105",
             i
         );
@@ -480,7 +481,7 @@ fn stress_handshake_timeout_recovery() {
             let mut body = vec![0u8; length];
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
-            assert_eq!(packet.command, CMD_CONNECT);
+            assert_eq!(packet.command(), CMD_CONNECT);
 
             // Don't respond → client will timeout after ~5s
 
@@ -491,9 +492,9 @@ fn stress_handshake_timeout_recovery() {
             let mut body2 = vec![0u8; length2];
             stream.read_exact(&mut body2).unwrap();
             let packet2 = ZKPacket::from_bytes_owned(body2).unwrap();
-            assert_eq!(packet2.command, CMD_CONNECT);
+            assert_eq!(packet2.command(), CMD_CONNECT);
 
-            let res = ZKPacket::new(CMD_ACK_OK, 8888, packet2.reply_id, vec![]);
+            let res = ZKPacket::new(CMD_ACK_OK, 8888, packet2.reply_id(), vec![]);
             send_response(&mut stream, &res);
 
             // Handle CMD_EXIT
@@ -502,9 +503,9 @@ fn stress_handshake_timeout_recovery() {
                     Some(p) => p,
                     None => break,
                 };
-                let res = ZKPacket::new(CMD_ACK_OK, 8888, pkt.reply_id, vec![]);
+                let res = ZKPacket::new(CMD_ACK_OK, 8888, pkt.reply_id(), vec![]);
                 send_response(&mut stream, &res);
-                if pkt.command == CMD_EXIT {
+                if pkt.command() == CMD_EXIT {
                     break;
                 }
             }

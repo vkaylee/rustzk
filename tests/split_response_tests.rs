@@ -24,9 +24,9 @@ fn test_read_sizes_split_response_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_CONNECT);
+        assert_eq!(packet.command(), CMD_CONNECT);
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -38,11 +38,11 @@ fn test_read_sizes_split_response_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_GET_FREE_SIZES);
+        assert_eq!(packet.command(), CMD_GET_FREE_SIZES);
 
         // SYIMULATE BUG/SPLIT:
         // First send an empty ACK_OK
-        let ack_ok = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let ack_ok = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&ack_ok.to_bytes()))
             .unwrap();
@@ -57,7 +57,7 @@ fn test_read_sizes_split_response_tcp() {
         // Set record count to 456 (fields[8] is offset 32..36)
         LittleEndian::write_i32(&mut sizes_payload[32..36], 456);
 
-        let data_res = ZKPacket::new(CMD_ACK_DATA, session_id, packet.reply_id, sizes_payload);
+        let data_res = ZKPacket::new(CMD_ACK_DATA, session_id, packet.reply_id(), sizes_payload);
         stream
             .write_all(&TCPWrapper::wrap(&data_res.to_bytes()))
             .unwrap();
@@ -69,11 +69,11 @@ fn test_read_sizes_split_response_tcp() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_OPTIONS_RRQ);
+        assert_eq!(packet.command(), CMD_OPTIONS_RRQ);
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             b"TZAdj=7\0".to_vec(),
         );
         stream

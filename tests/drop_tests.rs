@@ -30,10 +30,10 @@ fn test_zk_drop_auto_disconnects() {
             stream.read_exact(&mut body).expect("Failed to read body");
             let packet = ZKPacket::from_bytes(&body).expect("Failed to parse packet");
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
                     session_id = 1234;
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -41,7 +41,7 @@ fn test_zk_drop_auto_disconnects() {
                 CMD_EXIT => {
                     // Signal that we received CMD_EXIT
                     tx.send(true).unwrap();
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                     break;
                 }
@@ -90,16 +90,16 @@ fn test_zk_manual_disconnect_then_drop() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
                     session_id = 1234;
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                 }
                 CMD_EXIT => {
                     exit_count += 1;
                     tx.send(exit_count).unwrap();
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                     // Don't break immediately to see if another exit comes
                 }
@@ -146,13 +146,13 @@ fn test_zk_double_connect_returns_error() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                     break;
                 }
@@ -204,8 +204,8 @@ fn test_zk_disconnect_uses_short_timeout() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            if packet.command == CMD_CONNECT {
-                let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id, vec![]);
+            if packet.command() == CMD_CONNECT {
+                let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
                 let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                 // Signal that connect is done, then close the stream
                 // to simulate device becoming unreachable

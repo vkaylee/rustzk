@@ -28,9 +28,9 @@ fn test_read_chunk_waits_for_data_after_ack() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -42,7 +42,7 @@ fn test_read_chunk_waits_for_data_after_ack() {
                         let val = if i == 4 || i == 8 { 1 } else { 0 };
                         bytes.write_i32::<LittleEndian>(val).unwrap();
                     }
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, bytes);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -54,7 +54,7 @@ fn test_read_chunk_waits_for_data_after_ack() {
                     res_payload[0] = 1;
                     LittleEndian::write_u32(&mut res_payload[1..5], size as u32);
                     let res =
-                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id(), res_payload);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -66,7 +66,7 @@ fn test_read_chunk_waits_for_data_after_ack() {
                     // The client MUST NOT send another request.
 
                     // 1. Send ACK
-                    let ack = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let ack = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&ack.to_bytes()))
                         .unwrap();
@@ -89,26 +89,26 @@ fn test_read_chunk_waits_for_data_after_ack() {
                     data.write_u16::<LittleEndian>(0).unwrap();
                     data.write_u32::<LittleEndian>(101).unwrap(); // UserID
 
-                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, data);
+                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), data);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_FREE_DATA => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                     break;
                 }
                 _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -124,7 +124,7 @@ fn test_read_chunk_waits_for_data_after_ack() {
     let users = zk.get_users().expect("get_users failed");
 
     assert_eq!(users.len(), 1);
-    assert_eq!(users[0].name, "Test");
+    assert_eq!(users[0].name(), "Test");
 
     zk.disconnect().unwrap();
     server_handle.join().unwrap();

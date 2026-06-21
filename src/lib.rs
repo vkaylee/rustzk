@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods)]
 pub mod constants;
 pub use crate::constants::*;
 pub mod models;
@@ -30,7 +31,7 @@ pub enum ZKError {
 pub type ZKResult<T> = Result<T, ZKError>;
 
 pub enum ZKTransport {
-    Tcp(TcpStream),
+    Tcp(std::io::BufReader<TcpStream>),
     Udp(UdpSocket),
 }
 
@@ -193,7 +194,7 @@ impl ZK {
         stream.set_read_timeout(Some(self.timeout))?;
         stream.set_write_timeout(Some(self.timeout))?;
 
-        self.transport = Some(ZKTransport::Tcp(stream));
+        self.transport = Some(ZKTransport::Tcp(std::io::BufReader::new(stream)));
         match self.perform_connect_handshake() {
             Ok(()) => Ok(()),
             Err(e) => {
@@ -208,6 +209,12 @@ impl ZK {
     /// In such environments, consider using TCP instead.
     fn connect_udp(&mut self) -> ZKResult<()> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
+        // Set UDP receive buffer size to a generous 2MB to prevent packet loss under high-volume transfers
+        let socket2_sock = socket2::Socket::from(socket);
+        if let Err(e) = socket2_sock.set_recv_buffer_size(2 * 1024 * 1024) {
+            log::debug!("Failed to set UDP receive buffer size (SO_RCVBUF): {}", e);
+        }
+        let socket = std::net::UdpSocket::from(socket2_sock);
         socket.connect(&self.addr)?;
         socket.set_read_timeout(Some(self.timeout))?;
         socket.set_write_timeout(Some(self.timeout))?;
@@ -308,8 +315,8 @@ impl ZK {
     fn set_transport_read_timeout(&self, timeout: Duration) {
         if let Some(ref transport) = self.transport {
             match transport {
-                ZKTransport::Tcp(stream) => {
-                    let _ = stream.set_read_timeout(Some(timeout));
+                ZKTransport::Tcp(reader) => {
+                    let _ = reader.get_ref().set_read_timeout(Some(timeout));
                 }
                 ZKTransport::Udp(socket) => {
                     let _ = socket.set_read_timeout(Some(timeout));
@@ -373,9 +380,9 @@ impl ZK {
             .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
         let udp_buf = &mut self.udp_buf;
         match transport {
-            ZKTransport::Tcp(stream) => {
+            ZKTransport::Tcp(reader) => {
                 let mut header = [0u8; 8];
-                stream.read_exact(&mut header)?;
+                reader.read_exact(&mut header)?;
                 let (length, _) = TCPWrapper::decode_header(&header)
                     .map_err(|e| ZKError::InvalidData(e.to_string()))?;
 
@@ -383,7 +390,7 @@ impl ZK {
                 crate::security::validate_packet_size(length)?;
 
                 let mut body = vec![0u8; length];
-                stream.read_exact(&mut body)?;
+                reader.read_exact(&mut body)?;
 
                 ZKPacket::from_bytes_owned(body)
             }
@@ -464,13 +471,13 @@ impl ZK {
             .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
 
         match transport {
-            ZKTransport::Tcp(stream) => {
+            ZKTransport::Tcp(reader) => {
                 let mut buf = Vec::with_capacity(packet.payload.len() + 16);
                 buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
                 buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
                 buf.write_u32::<LittleEndian>((packet.payload.len() + 8) as u32)?;
                 packet.to_bytes_into(&mut buf)?;
-                stream.write_all(&buf)?;
+                reader.get_mut().write_all(&buf)?;
             }
             ZKTransport::Udp(socket) => {
                 let mut buf = Vec::with_capacity(packet.payload.len() + 8);
@@ -1522,13 +1529,13 @@ impl ZK {
         let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, Vec::new());
 
         match transport {
-            ZKTransport::Tcp(stream) => {
+            ZKTransport::Tcp(reader) => {
                 let mut buf = Vec::with_capacity(16);
                 buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
                 buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
                 buf.write_u32::<LittleEndian>(8)?;
                 packet.to_bytes_into(&mut buf)?;
-                stream.write_all(&buf)?;
+                reader.get_mut().write_all(&buf)?;
             }
             ZKTransport::Udp(socket) => {
                 let mut buf = Vec::with_capacity(8);

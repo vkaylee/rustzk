@@ -60,23 +60,23 @@ fn test_parse_user_28bytes() {
     let _pad = rdr.read_u8().unwrap();
     let group_id = rdr.read_u8().unwrap();
 
-    let user = User {
+    let user = User::new(
         uid,
-        name: String::from_utf8_lossy(&name_bytes)
+        String::from_utf8_lossy(&name_bytes)
             .trim_matches('\0')
             .to_string(),
         privilege,
-        password: String::from_utf8_lossy(&password_bytes)
+        String::from_utf8_lossy(&password_bytes)
             .trim_matches('\0')
             .to_string(),
-        group_id: group_id.to_string(),
-        user_id: "101".to_string(),
+        group_id.to_string(),
+        "101".to_string(),
         card,
-    };
+    );
 
-    assert_eq!(user.uid, 1);
-    assert_eq!(user.name, "John");
-    assert_eq!(user.privilege, 14);
+    assert_eq!(user.uid(), 1);
+    assert_eq!(user.name(), "John");
+    assert_eq!(user.privilege(), 14);
 }
 
 #[test]

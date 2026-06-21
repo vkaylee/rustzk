@@ -33,14 +33,19 @@ fn test_default_vs_legacy_checksum_differ_by_one() {
 
     // Default (Python-aligned): 0xFC17
     assert_eq!(
-        default.checksum, 0xFC17,
+        default.checksum(),
+        0xFC17,
         "Default checksum should be 0xFC17"
     );
     // Legacy (Rust bitwise NOT): 0xFC18
-    assert_eq!(legacy.checksum, 0xFC18, "Legacy checksum should be 0xFC18");
+    assert_eq!(
+        legacy.checksum(),
+        0xFC18,
+        "Legacy checksum should be 0xFC18"
+    );
     // Difference is exactly 1
     assert_eq!(
-        legacy.checksum - default.checksum,
+        legacy.checksum() - default.checksum(),
         1,
         "Legacy should be exactly 1 greater than default"
     );
@@ -63,11 +68,11 @@ fn test_checksum_difference_is_always_one() {
         let legacy = ZKPacket::new_with_legacy(cmd, sid, rid, payload);
 
         assert_eq!(
-            legacy.checksum.wrapping_sub(default.checksum),
+            legacy.checksum().wrapping_sub(default.checksum()),
             1,
             "Default={:#06X} Legacy={:#06X} for cmd={}, sid={}, rid={}",
-            default.checksum,
-            legacy.checksum,
+            default.checksum(),
+            legacy.checksum(),
             cmd,
             sid,
             rid
@@ -88,10 +93,10 @@ fn test_both_checksums_produce_valid_packets() {
     let decoded_default = ZKPacket::from_bytes(&default_bytes).unwrap();
     let decoded_legacy = ZKPacket::from_bytes(&legacy_bytes).unwrap();
 
-    assert_eq!(decoded_default.command, CMD_CONNECT);
-    assert_eq!(decoded_legacy.command, CMD_CONNECT);
-    assert_eq!(decoded_default.checksum, 0xFC17);
-    assert_eq!(decoded_legacy.checksum, 0xFC18);
+    assert_eq!(decoded_default.command(), CMD_CONNECT);
+    assert_eq!(decoded_legacy.command(), CMD_CONNECT);
+    assert_eq!(decoded_default.checksum(), 0xFC17);
+    assert_eq!(decoded_legacy.checksum(), 0xFC18);
 }
 
 /// Verify the standalone calculate_checksum function matches packet checksum.
@@ -102,7 +107,8 @@ fn test_standalone_checksum_matches_packet() {
     let packet = ZKPacket::new(1000, 0, 65534, vec![]);
 
     assert_eq!(
-        standalone, packet.checksum,
+        standalone,
+        packet.checksum(),
         "Standalone and packet checksum should match"
     );
 }
@@ -133,13 +139,18 @@ fn test_auto_fallback_to_legacy_checksum() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet1 = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet1.command, CMD_CONNECT);
+        assert_eq!(packet1.command(), CMD_CONNECT);
 
         // Verify this is the DEFAULT checksum by comparing with independently computed value
-        let expected_default =
-            ZKPacket::new(CMD_CONNECT, packet1.session_id, packet1.reply_id, vec![]);
+        let expected_default = ZKPacket::new(
+            CMD_CONNECT,
+            packet1.session_id(),
+            packet1.reply_id(),
+            vec![],
+        );
         assert_eq!(
-            packet1.checksum, expected_default.checksum,
+            packet1.checksum(),
+            expected_default.checksum(),
             "First attempt should use default checksum"
         );
         // Don't send any response — simulate firmware that rejected the checksum.
@@ -150,21 +161,26 @@ fn test_auto_fallback_to_legacy_checksum() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet2 = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet2.command, CMD_CONNECT);
+        assert_eq!(packet2.command(), CMD_CONNECT);
 
         // Verify this is the LEGACY checksum
-        let expected_legacy =
-            ZKPacket::new_with_legacy(CMD_CONNECT, packet2.session_id, packet2.reply_id, vec![]);
+        let expected_legacy = ZKPacket::new_with_legacy(
+            CMD_CONNECT,
+            packet2.session_id(),
+            packet2.reply_id(),
+            vec![],
+        );
         assert_eq!(
-            packet2.checksum, expected_legacy.checksum,
+            packet2.checksum(),
+            expected_legacy.checksum(),
             "Second attempt should use legacy checksum"
         );
 
         // Confirm the two checksums differ by exactly 1
-        assert_eq!(packet2.checksum - packet1.checksum, 1);
+        assert_eq!(packet2.checksum() - packet1.checksum(), 1);
 
         // Accept — send CMD_ACK_OK response
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet2.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet2.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -210,17 +226,18 @@ fn test_set_legacy_checksum_skips_autodetect() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_CONNECT);
+        assert_eq!(packet.command(), CMD_CONNECT);
 
         // Verify legacy checksum by comparing against independently computed value
         let expected_legacy =
-            ZKPacket::new_with_legacy(CMD_CONNECT, packet.session_id, packet.reply_id, vec![]);
+            ZKPacket::new_with_legacy(CMD_CONNECT, packet.session_id(), packet.reply_id(), vec![]);
         assert_eq!(
-            packet.checksum, expected_legacy.checksum,
+            packet.checksum(),
+            expected_legacy.checksum(),
             "With set_legacy_checksum(true), first packet should use legacy"
         );
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -276,10 +293,10 @@ fn test_subsequent_commands_use_detected_checksum() {
 
         // Verify legacy checksum
         let expected =
-            ZKPacket::new_with_legacy(CMD_CONNECT, packet.session_id, packet.reply_id, vec![]);
-        assert_eq!(packet.checksum, expected.checksum, "Should be legacy");
+            ZKPacket::new_with_legacy(CMD_CONNECT, packet.session_id(), packet.reply_id(), vec![]);
+        assert_eq!(packet.checksum(), expected.checksum(), "Should be legacy");
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -290,13 +307,18 @@ fn test_subsequent_commands_use_detected_checksum() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        assert_eq!(packet.command, CMD_GET_VERSION);
+        assert_eq!(packet.command(), CMD_GET_VERSION);
 
         // Verify the subsequent command ALSO uses legacy checksum
-        let expected =
-            ZKPacket::new_with_legacy(CMD_GET_VERSION, packet.session_id, packet.reply_id, vec![]);
+        let expected = ZKPacket::new_with_legacy(
+            CMD_GET_VERSION,
+            packet.session_id(),
+            packet.reply_id(),
+            vec![],
+        );
         assert_eq!(
-            packet.checksum, expected.checksum,
+            packet.checksum(),
+            expected.checksum(),
             "Subsequent commands should continue using legacy checksum"
         );
 
@@ -304,7 +326,7 @@ fn test_subsequent_commands_use_detected_checksum() {
         let res = ZKPacket::new(
             CMD_ACK_OK,
             session_id,
-            packet.reply_id,
+            packet.reply_id(),
             b"Ver 6.60 Test\0".to_vec(),
         );
         stream

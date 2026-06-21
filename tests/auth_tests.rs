@@ -27,31 +27,32 @@ fn test_auth_handshake_mock() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes(&body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
                     // Respond with UNAUTH to trigger client auth flow
-                    let res = ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_AUTH => {
                     // Check if payload has 4 bytes (commkey)
-                    if packet.payload.len() == 4 {
+                    if packet.payload().len() == 4 {
                         authenticated = true;
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         stream
                             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                             .unwrap();
                     } else {
-                        let res = ZKPacket::new(CMD_ACK_ERROR, session_id, packet.reply_id, vec![]);
+                        let res =
+                            ZKPacket::new(CMD_ACK_ERROR, session_id, packet.reply_id(), vec![]);
                         stream
                             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                             .unwrap();
                     }
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -59,13 +60,13 @@ fn test_auth_handshake_mock() {
                 }
                 _ => {
                     if authenticated {
-                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                         stream
                             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                             .unwrap();
                     } else {
                         let res =
-                            ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id, vec![]);
+                            ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id(), vec![]);
                         stream
                             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                             .unwrap();
@@ -108,31 +109,31 @@ fn test_connect_with_password_mock() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
                     // Force UNAUTH to trigger password flow
-                    let res = ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_UNAUTH, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_AUTH => {
                     // Check if password payload exists (4 bytes)
-                    assert_eq!(packet.payload.len(), 4);
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    assert_eq!(packet.payload().len(), 4);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                     break;
                 }
                 _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -173,30 +174,30 @@ fn test_change_password_mock() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_OPTIONS_WRQ => {
-                    let payload = String::from_utf8_lossy(&packet.payload);
+                    let payload = String::from_utf8_lossy(&packet.payload());
                     assert!(payload.contains("ComKey=654321"));
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                     break;
                 }
                 _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();

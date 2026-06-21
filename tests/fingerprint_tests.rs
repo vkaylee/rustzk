@@ -27,9 +27,9 @@ fn test_get_templates_mock() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -37,7 +37,7 @@ fn test_get_templates_mock() {
                 CMD_GET_FREE_SIZES => {
                     let mut bytes = vec![0u8; 80];
                     <LittleEndian as ByteOrder>::write_i32(&mut bytes[24..28], 1); // 1 finger
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, bytes);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -47,7 +47,7 @@ fn test_get_templates_mock() {
                     res_payload[0] = 1;
                     <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 16); // 4 + 12
                     let res =
-                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id, res_payload);
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id(), res_payload);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -62,20 +62,20 @@ fn test_get_templates_mock() {
                     data.write_u8(1).unwrap();
                     data.write_all(&[0xAA; 6]).unwrap();
 
-                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id, data);
+                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), data);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                     break;
                 }
                 _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
@@ -89,9 +89,9 @@ fn test_get_templates_mock() {
 
     let templates = zk.get_templates().unwrap();
     assert_eq!(templates.len(), 1);
-    assert_eq!(templates[0].uid, 1);
-    assert_eq!(templates[0].fid, 0);
-    assert_eq!(templates[0].template, vec![0xAA; 6]);
+    assert_eq!(templates[0].uid(), 1);
+    assert_eq!(templates[0].fid(), 0);
+    assert_eq!(templates[0].template(), vec![0xAA; 6]);
 
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
@@ -118,35 +118,35 @@ fn test_delete_user_template_mock() {
             stream.read_exact(&mut body).unwrap();
             let packet = ZKPacket::from_bytes_owned(body).unwrap();
 
-            match packet.command {
+            match packet.command() {
                 CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_DELETE_USERTEMP => {
-                    assert_eq!(packet.payload.len(), 3);
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    assert_eq!(packet.payload().len(), 3);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_REFRESHDATA => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                 }
                 CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();
                     break;
                 }
                 _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id, vec![]);
+                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();

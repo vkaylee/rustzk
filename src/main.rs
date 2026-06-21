@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_macros)]
+#![allow(clippy::disallowed_methods)]
 use rustzk::{ZKProtocol, ZK};
 use std::env;
 
@@ -68,7 +70,11 @@ fn main() {
             for user in &users {
                 println!(
                     "  UID: {:>4} | ID: {:>10} | Name: {:>20} | Privilege: {} | Card: {}",
-                    user.uid, user.user_id, user.name, user.privilege, user.card
+                    user.uid(),
+                    user.user_id(),
+                    user.name(),
+                    user.privilege(),
+                    user.card()
                 );
             }
         }
