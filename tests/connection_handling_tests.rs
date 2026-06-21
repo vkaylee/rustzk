@@ -85,7 +85,7 @@ fn test_transport_cleaned_on_handshake_failure() {
     });
 
     // Reconnect to new server — should succeed since transport was cleaned
-    zk.addr = format!("127.0.0.1:{}", port2);
+    zk.set_addr(format!("127.0.0.1:{}", port2));
     let result = zk.connect(ZKProtocol::TCP);
     assert!(
         result.is_ok(),
@@ -138,7 +138,7 @@ fn test_restart_resets_state_on_error() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    zk.timeout = Duration::from_secs(2); // Short timeout for fast test
+    zk.set_timeout(Duration::from_secs(2)); // Short timeout for fast test
     zk.connect(ZKProtocol::TCP).expect("Connect should succeed");
     assert!(zk.is_connected());
 
@@ -191,7 +191,7 @@ fn test_poweroff_resets_state_on_error() {
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
-    zk.timeout = Duration::from_secs(2); // Short timeout for fast test
+    zk.set_timeout(Duration::from_secs(2)); // Short timeout for fast test
     zk.connect(ZKProtocol::TCP).expect("Connect should succeed");
     assert!(zk.is_connected());
 

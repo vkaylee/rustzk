@@ -36,7 +36,7 @@ fn test_get_option_and_timezone_mock() {
                         .unwrap();
                 }
                 CMD_OPTIONS_RRQ => {
-                    let key = String::from_utf8_lossy(&packet.payload())
+                    let key = String::from_utf8_lossy(packet.payload())
                         .trim_matches('\0')
                         .to_string();
                     let response_str = match key.as_str() {

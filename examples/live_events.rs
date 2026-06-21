@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut zk = ZK::new(&ip, port);
     // Set a shorter timeout for responsive idle detection
-    zk.timeout = std::time::Duration::from_secs(5);
+    zk.set_timeout(std::time::Duration::from_secs(5));
     zk.connect(ZKProtocol::Auto)?;
 
     println!(
@@ -36,10 +36,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(log) => {
                 println!(
                     "NEW EVENT: User: {:<10} | Time: {:<25} | Status: {} | Punch: {}",
-                    log.user_id,
+                    log.user_id(),
                     log.iso_format(),
-                    log.status,
-                    log.punch
+                    log.status(),
+                    log.punch()
                 );
             }
             Err(e) => {

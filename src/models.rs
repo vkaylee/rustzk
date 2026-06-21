@@ -76,7 +76,10 @@ impl Attendance {
             return None;
         }
         let offset = FixedOffset::east_opt(self.timezone_offset * 60)
-            .unwrap_or_else(|| FixedOffset::east_opt(0).expect("UTC offset 0 is always valid"));
+            .unwrap_or_else(|| {
+                #[allow(clippy::unwrap_used)]
+                FixedOffset::east_opt(0).unwrap()
+            });
         offset.from_local_datetime(&self.timestamp).single()
     }
 
@@ -150,6 +153,11 @@ impl User {
     /// Getter for name.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Setter for name.
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
     }
 
     /// Getter for privilege.
@@ -239,6 +247,7 @@ impl Finger {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -334,5 +343,34 @@ mod tests {
 
         // ISO format should fallback to naive representation
         assert_eq!(att_invalid.iso_format(), "2026-02-19T09:16:41");
+    }
+
+    #[test]
+    fn test_uncovered_models() {
+        let naive = chrono::NaiveDate::from_ymd_opt(2024, 3, 9)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        let att = Attendance::new(10, "101".to_string(), naive, 1, 3, 420);
+        assert_eq!(att.uid(), 10);
+        assert_eq!(att.user_id(), "101");
+        assert_eq!(att.timestamp(), naive);
+        assert_eq!(att.status(), 1);
+        assert_eq!(att.punch(), 3);
+        assert!(att.timestamp_fixed().is_some());
+
+        let mut user = User {
+            uid: 1,
+            name: "Initial".to_string(),
+            privilege: 0,
+            password: "pass".to_string(),
+            group_id: "grp".to_string(),
+            user_id: "1".to_string(),
+            card: 0,
+        };
+        user.set_name("Updated".to_string());
+        assert_eq!(user.name(), "Updated");
+        assert_eq!(user.password(), "pass");
+        assert_eq!(user.group_id(), "grp");
     }
 }

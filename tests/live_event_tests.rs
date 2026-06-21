@@ -101,7 +101,7 @@ fn test_live_events_10byte_mock() {
     start_live_mock_server(listener, 1234, "10byte");
 
     let mut zk = ZK::new("127.0.0.1", addr.port());
-    zk.timeout = Duration::from_millis(500);
+    zk.set_timeout(Duration::from_millis(500));
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let mut event_iter = zk.listen_events().unwrap();
@@ -121,7 +121,7 @@ fn test_live_events_32byte_mock() {
     start_live_mock_server(listener, 4321, "32byte");
 
     let mut zk = ZK::new("127.0.0.1", addr.port());
-    zk.timeout = Duration::from_millis(500);
+    zk.set_timeout(Duration::from_millis(500));
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let mut event_iter = zk.listen_events().unwrap();

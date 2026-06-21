@@ -182,7 +182,7 @@ fn test_change_password_mock() {
                         .unwrap();
                 }
                 CMD_OPTIONS_WRQ => {
-                    let payload = String::from_utf8_lossy(&packet.payload());
+                    let payload = String::from_utf8_lossy(packet.payload());
                     assert!(payload.contains("ComKey=654321"));
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     stream

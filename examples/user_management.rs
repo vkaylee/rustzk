@@ -31,19 +31,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Create a new user object using the discovered UID
     let user_id_str = next_uid.to_string();
-    let new_user = User {
-        uid: next_uid,
-        user_id: user_id_str.clone(), // Use same ID as UID for simplicity
-        name: "Rust Dev".into(),
-        privilege: USER_DEFAULT,
-        password: "".into(),
-        group_id: "1".into(),
-        card: 0,
-    };
+    let new_user = User::new(
+        next_uid,
+        "Rust Dev".into(),
+        USER_DEFAULT,
+        "".into(),
+        "1".into(),
+        user_id_str.clone(), // Use same ID as UID for simplicity
+        0,
+    );
 
     println!(
         "Adding user: {} (ID: {}, UID: {})",
-        new_user.name, new_user.user_id, new_user.uid
+        new_user.name(),
+        new_user.user_id(),
+        new_user.uid()
     );
     zk.set_user(&new_user)?;
     println!("User added successfully.");
@@ -51,8 +53,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. List users to verify
     println!("\nFetching user list...");
     let users = zk.get_users()?;
-    if let Some(user) = users.iter().find(|u| u.uid == next_uid) {
-        println!("Verified: User found in device list: {}", user.name);
+    if let Some(user) = users.iter().find(|u| u.uid() == next_uid) {
+        println!("Verified: User found in device list: {}", user.name());
     } else {
         println!("Warning: User not found in list immediately after adding.");
     }
@@ -60,8 +62,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. Update user by ID
     println!("\nDemonstrating Update by ID: {}", user_id_str);
     if let Some(mut user) = zk.find_user_by_id(&user_id_str)? {
-        println!("Found User with UID: {}. Updating name...", user.uid);
-        user.name = "Updated Rust Dev".into();
+        println!("Found User with UID: {}. Updating name...", user.uid());
+        user.set_name("Updated Rust Dev".into());
         zk.set_user(&user)?;
         println!("User updated successfully.");
     }

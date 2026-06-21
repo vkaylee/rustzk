@@ -46,10 +46,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for temp in templates.iter().take(20) {
             println!(
                 "{:<6} {:<6} {:<10} {:<15}",
-                temp.uid,
-                temp.fid,
-                temp.valid,
-                temp.template.len()
+                temp.uid(),
+                temp.fid(),
+                temp.valid(),
+                temp.template().len()
             );
         }
 

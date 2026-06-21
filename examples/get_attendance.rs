@@ -69,11 +69,11 @@ fn main() {
                 for log in &logs {
                     println!(
                         "{:<6} {:<15} {:<25} {:<8} {:<6}",
-                        log.uid,
-                        log.user_id,
+                        log.uid(),
+                        log.user_id(),
                         log.iso_format(),
-                        log.status,
-                        log.punch
+                        log.status(),
+                        log.punch()
                     );
                 }
 
@@ -82,7 +82,7 @@ fn main() {
                 println!("Total attendance records : {}", logs.len());
 
                 // Count unique users
-                let mut user_ids: Vec<&str> = logs.iter().map(|l| l.user_id.as_str()).collect();
+                let mut user_ids: Vec<&str> = logs.iter().map(|l| l.user_id()).collect();
                 user_ids.sort_unstable();
                 user_ids.dedup();
                 println!("Unique users (with logs) : {}", user_ids.len());

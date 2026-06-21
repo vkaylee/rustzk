@@ -1,4 +1,8 @@
-#![allow(clippy::disallowed_methods)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+
 pub mod constants;
 pub use crate::constants::*;
 pub mod models;
@@ -31,8 +35,8 @@ pub enum ZKError {
 pub type ZKResult<T> = Result<T, ZKError>;
 
 pub enum ZKTransport {
-    Tcp(std::io::BufReader<TcpStream>),
-    Udp(UdpSocket),
+    Tcp(std::sync::Arc<std::sync::Mutex<std::io::BufReader<TcpStream>>>),
+    Udp(std::sync::Arc<std::sync::Mutex<UdpSocket>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,14 +47,14 @@ pub enum ZKProtocol {
 }
 
 pub struct ZK {
-    pub addr: String,
+    addr: String,
     transport: Option<ZKTransport>,
     session_id: u16,
     reply_id: u16,
-    pub timeout: Duration,
+    timeout: Duration,
     is_connected: bool,
     user_id_cache: Option<HashMap<u16, String>>,
-    pub user_packet_size: usize,
+    user_packet_size: usize,
     users: u32,
     fingers: u32,
     records: u32,
@@ -60,7 +64,7 @@ pub struct ZK {
     users_cap: i32,
     rec_cap: i32,
     faces_cap: i32,
-    pub encoding: &'static str,
+    encoding: &'static str,
     password: u32,
     timezone_offset: i32, // Offset in minutes
     timezone_synced: bool,
@@ -121,6 +125,41 @@ impl ZK {
     /// ```
     pub fn set_legacy_checksum(&mut self, legacy: bool) {
         self.use_legacy_checksum = legacy;
+    }
+
+    /// Returns the device address.
+    pub fn addr(&self) -> &str {
+        &self.addr
+    }
+
+    /// Sets the device address.
+    pub fn set_addr(&mut self, addr: String) {
+        self.addr = addr;
+    }
+
+    /// Returns the read/write timeout.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    /// Sets the read/write timeout.
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = timeout;
+    }
+
+    /// Returns the user packet size.
+    pub fn user_packet_size(&self) -> usize {
+        self.user_packet_size
+    }
+
+    /// Sets the user packet size.
+    pub fn set_user_packet_size(&mut self, size: usize) {
+        self.user_packet_size = size;
+    }
+
+    /// Returns the string encoding used for decoding display names.
+    pub fn encoding(&self) -> &'static str {
+        self.encoding
     }
 
     /// Internal helper to generate the authentication communication key.
@@ -194,7 +233,9 @@ impl ZK {
         stream.set_read_timeout(Some(self.timeout))?;
         stream.set_write_timeout(Some(self.timeout))?;
 
-        self.transport = Some(ZKTransport::Tcp(std::io::BufReader::new(stream)));
+        self.transport = Some(ZKTransport::Tcp(std::sync::Arc::new(
+            std::sync::Mutex::new(std::io::BufReader::new(stream)),
+        )));
         match self.perform_connect_handshake() {
             Ok(()) => Ok(()),
             Err(e) => {
@@ -219,7 +260,9 @@ impl ZK {
         socket.set_read_timeout(Some(self.timeout))?;
         socket.set_write_timeout(Some(self.timeout))?;
 
-        self.transport = Some(ZKTransport::Udp(socket));
+        self.transport = Some(ZKTransport::Udp(std::sync::Arc::new(
+            std::sync::Mutex::new(socket),
+        )));
         match self.perform_connect_handshake() {
             Ok(()) => Ok(()),
             Err(e) => {
@@ -315,11 +358,15 @@ impl ZK {
     fn set_transport_read_timeout(&self, timeout: Duration) {
         if let Some(ref transport) = self.transport {
             match transport {
-                ZKTransport::Tcp(reader) => {
-                    let _ = reader.get_ref().set_read_timeout(Some(timeout));
+                ZKTransport::Tcp(reader_mutex) => {
+                    if let Ok(reader) = reader_mutex.lock() {
+                        let _ = reader.get_ref().set_read_timeout(Some(timeout));
+                    }
                 }
-                ZKTransport::Udp(socket) => {
-                    let _ = socket.set_read_timeout(Some(timeout));
+                ZKTransport::Udp(socket_mutex) => {
+                    if let Ok(socket) = socket_mutex.lock() {
+                        let _ = socket.set_read_timeout(Some(timeout));
+                    }
                 }
             }
         }
@@ -376,11 +423,14 @@ impl ZK {
         // Destructure to borrow disjoint fields separately
         let transport = self
             .transport
-            .as_mut()
+            .as_ref()
             .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
         let udp_buf = &mut self.udp_buf;
         match transport {
-            ZKTransport::Tcp(reader) => {
+            ZKTransport::Tcp(reader_mutex) => {
+                let mut reader = reader_mutex
+                    .lock()
+                    .map_err(|e| ZKError::Connection(format!("Lock poisoning error: {}", e)))?;
                 let mut header = [0u8; 8];
                 reader.read_exact(&mut header)?;
                 let (length, _) = TCPWrapper::decode_header(&header)
@@ -394,7 +444,10 @@ impl ZK {
 
                 ZKPacket::from_bytes_owned(body)
             }
-            ZKTransport::Udp(socket) => {
+            ZKTransport::Udp(socket_mutex) => {
+                let socket = socket_mutex
+                    .lock()
+                    .map_err(|e| ZKError::Connection(format!("Lock poisoning error: {}", e)))?;
                 udp_buf.resize(2048, 0);
                 let len = socket.recv(udp_buf)?;
                 let packet_data = udp_buf[..len].to_vec();
@@ -467,11 +520,14 @@ impl ZK {
 
         let transport = self
             .transport
-            .as_mut()
+            .as_ref()
             .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
 
         match transport {
-            ZKTransport::Tcp(reader) => {
+            ZKTransport::Tcp(reader_mutex) => {
+                let mut reader = reader_mutex
+                    .lock()
+                    .map_err(|e| ZKError::Connection(format!("Lock poisoning error: {}", e)))?;
                 let mut buf = Vec::with_capacity(packet.payload.len() + 16);
                 buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
                 buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
@@ -479,7 +535,10 @@ impl ZK {
                 packet.to_bytes_into(&mut buf)?;
                 reader.get_mut().write_all(&buf)?;
             }
-            ZKTransport::Udp(socket) => {
+            ZKTransport::Udp(socket_mutex) => {
+                let socket = socket_mutex
+                    .lock()
+                    .map_err(|e| ZKError::Connection(format!("Lock poisoning error: {}", e)))?;
                 let mut buf = Vec::with_capacity(packet.payload.len() + 8);
                 packet.to_bytes_into(&mut buf)?;
                 socket.send(&buf)?;
@@ -1084,7 +1143,10 @@ impl ZK {
         if res.command == CMD_ACK_OK || res.command == CMD_ACK_DATA {
             let naive = ZK::decode_time(&res.payload)?;
             let offset = FixedOffset::east_opt(self.timezone_offset * 60)
-                .unwrap_or_else(|| FixedOffset::east_opt(0).expect("UTC offset 0 is always valid"));
+                .unwrap_or_else(|| {
+                    #[allow(clippy::unwrap_used)]
+                    FixedOffset::east_opt(0).unwrap()
+                });
 
             offset
                 .from_local_datetime(&naive)
@@ -1524,12 +1586,15 @@ impl ZK {
     fn send_ack_ok(&mut self) -> ZKResult<()> {
         let transport = self
             .transport
-            .as_mut()
+            .as_ref()
             .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
         let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, Vec::new());
 
         match transport {
-            ZKTransport::Tcp(reader) => {
+            ZKTransport::Tcp(reader_mutex) => {
+                let mut reader = reader_mutex
+                    .lock()
+                    .map_err(|e| ZKError::Connection(format!("Lock poisoning error: {}", e)))?;
                 let mut buf = Vec::with_capacity(16);
                 buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
                 buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
@@ -1537,7 +1602,10 @@ impl ZK {
                 packet.to_bytes_into(&mut buf)?;
                 reader.get_mut().write_all(&buf)?;
             }
-            ZKTransport::Udp(socket) => {
+            ZKTransport::Udp(socket_mutex) => {
+                let socket = socket_mutex
+                    .lock()
+                    .map_err(|e| ZKError::Connection(format!("Lock poisoning error: {}", e)))?;
                 let mut buf = Vec::with_capacity(8);
                 packet.to_bytes_into(&mut buf)?;
                 socket.send(&buf)?;
@@ -1648,8 +1716,21 @@ impl ZK {
     pub fn is_connected(&self) -> bool {
         self.is_connected
     }
-    pub fn user_packet_size(&self) -> usize {
-        self.user_packet_size
+
+    /// Checks if the connection is still alive by sending a lightweight `CMD_GET_TIME` request to the device.
+    /// Returns `true` if the device responds successfully, and `false` otherwise.
+    /// If the connection has died, `is_connected` is automatically set to `false`.
+    pub fn is_alive(&mut self) -> bool {
+        if !self.is_connected {
+            return false;
+        }
+        match self.send_command(CMD_GET_TIME, &[]) {
+            Ok(packet) => packet.command == CMD_ACK_OK || packet.command == CMD_ACK_DATA,
+            Err(_) => {
+                self.is_connected = false;
+                false
+            }
+        }
     }
     pub fn session_id(&self) -> u16 {
         self.session_id
@@ -1712,6 +1793,25 @@ mod tests {
         // and add one more known verifiable point if we had it.
         // For now, I'll trust the logic based on the 0.1.0 baseline match.
         assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn test_zk_uncovered_getters_setters() {
+        let mut zk = ZK::new("192.168.1.201", 4370);
+        assert_eq!(zk.addr(), "192.168.1.201:4370");
+        zk.set_addr("10.0.0.1:4370".to_string());
+        assert_eq!(zk.addr(), "10.0.0.1:4370");
+
+        assert_eq!(zk.timeout(), Duration::from_secs(60));
+        zk.set_timeout(Duration::from_secs(15));
+        assert_eq!(zk.timeout(), Duration::from_secs(15));
+
+        assert_eq!(zk.user_packet_size(), 28);
+        zk.set_user_packet_size(72);
+        assert_eq!(zk.user_packet_size(), 72);
+
+        assert_eq!(zk.encoding(), "UTF-8");
+        assert!(!zk.is_alive());
     }
 }
 pub mod validation;

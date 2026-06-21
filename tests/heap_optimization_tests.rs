@@ -167,7 +167,7 @@ fn test_send_command_stack_array_payloads() {
             4,
             "UNLOCK payload should be 4 bytes (stack array)"
         );
-        let value = byteorder::LittleEndian::read_u32(&req.payload());
+        let value = byteorder::LittleEndian::read_u32(req.payload());
         assert_eq!(value, 50, "unlock(5) should send 5*10=50");
         send_response(
             &mut stream,
@@ -195,7 +195,7 @@ fn test_send_command_stack_array_payloads() {
             2,
             "DELETE_USER payload should be 2 bytes (stack array)"
         );
-        let uid = byteorder::LittleEndian::read_u16(&req.payload());
+        let uid = byteorder::LittleEndian::read_u16(req.payload());
         assert_eq!(uid, 42);
         send_response(
             &mut stream,
@@ -218,7 +218,7 @@ fn test_send_command_stack_array_payloads() {
             4,
             "REG_EVENT payload should be 4 bytes (stack array)"
         );
-        let flags = byteorder::LittleEndian::read_u32(&req.payload());
+        let flags = byteorder::LittleEndian::read_u32(req.payload());
         assert_eq!(flags, EF_ATTLOG);
         send_response(
             &mut stream,
@@ -361,9 +361,9 @@ fn test_buffer_commands_use_stack_arrays() {
 #[test]
 fn test_encoding_is_static_str() {
     let zk = ZK::new("192.168.1.1", 4370);
-    assert_eq!(zk.encoding, "UTF-8");
+    assert_eq!(zk.encoding(), "UTF-8");
     // If this compiles, encoding is &'static str (not String)
-    let _: &'static str = zk.encoding;
+    let _: &'static str = zk.encoding();
 }
 
 /// Verifies pre-allocated Vecs: get_users/get_attendance produce correct results.

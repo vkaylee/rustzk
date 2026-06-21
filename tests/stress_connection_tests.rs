@@ -67,12 +67,7 @@ fn spawn_reusable_mock_server(
             };
             let session_id: u16 = 5555;
 
-            loop {
-                let packet = match read_request(&mut stream) {
-                    Some(p) => p,
-                    None => break,
-                };
-
+            while let Some(packet) = read_request(&mut stream) {
                 match packet.command() {
                     CMD_CONNECT => {
                         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
@@ -123,12 +118,7 @@ fn spawn_data_mock_server(
             let session_id: u16 = 7777;
             let mut last_prepared_cmd: u16 = 0;
 
-            loop {
-                let packet = match read_request(&mut stream) {
-                    Some(p) => p,
-                    None => break,
-                };
-
+            while let Some(packet) = read_request(&mut stream) {
                 match packet.command() {
                     CMD_CONNECT => {
                         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
@@ -234,7 +224,7 @@ fn stress_rapid_connect_disconnect() {
 
     for i in 0..cycles {
         let mut zk = ZK::new("127.0.0.1", port);
-        zk.timeout = Duration::from_secs(5);
+        zk.set_timeout(Duration::from_secs(5));
 
         let result = zk.connect(ZKProtocol::TCP);
         assert!(
@@ -299,7 +289,7 @@ fn stress_concurrent_connections() {
             let server = spawn_reusable_mock_server(listener, 1, exit_counter.clone());
 
             let mut zk = ZK::new("127.0.0.1", port);
-            zk.timeout = Duration::from_secs(5);
+            zk.set_timeout(Duration::from_secs(5));
 
             let result = zk.connect(ZKProtocol::TCP);
             assert!(
@@ -355,7 +345,7 @@ fn stress_connect_with_data_operations() {
 
     for i in 0..cycles {
         let mut zk = ZK::new("127.0.0.1", port);
-        zk.timeout = Duration::from_secs(5);
+        zk.set_timeout(Duration::from_secs(5));
 
         zk.connect(ZKProtocol::TCP)
             .unwrap_or_else(|e| panic!("Cycle {}: connect failed: {}", i, e));
@@ -408,7 +398,7 @@ fn stress_session_state_integrity() {
 
     for i in 0..cycles {
         let mut zk = ZK::new("127.0.0.1", port);
-        zk.timeout = Duration::from_secs(5);
+        zk.set_timeout(Duration::from_secs(5));
 
         // Before connect: session_id should be 0
         assert_eq!(
@@ -498,11 +488,7 @@ fn stress_handshake_timeout_recovery() {
             send_response(&mut stream, &res);
 
             // Handle CMD_EXIT
-            loop {
-                let pkt = match read_request(&mut stream) {
-                    Some(p) => p,
-                    None => break,
-                };
+            while let Some(pkt) = read_request(&mut stream) {
                 let res = ZKPacket::new(CMD_ACK_OK, 8888, pkt.reply_id(), vec![]);
                 send_response(&mut stream, &res);
                 if pkt.command() == CMD_EXIT {
@@ -513,7 +499,7 @@ fn stress_handshake_timeout_recovery() {
 
         let mut zk = ZK::new("127.0.0.1", port);
         // Use short timeout so the test doesn't take forever
-        zk.timeout = Duration::from_secs(10);
+        zk.set_timeout(Duration::from_secs(10));
 
         let start = Instant::now();
         let result = zk.connect(ZKProtocol::TCP);
@@ -573,7 +559,7 @@ fn stress_cmd_exit_always_sent() {
     let half = cycles / 2;
     for i in 0..half {
         let mut zk = ZK::new("127.0.0.1", port);
-        zk.timeout = Duration::from_secs(5);
+        zk.set_timeout(Duration::from_secs(5));
         zk.connect(ZKProtocol::TCP)
             .unwrap_or_else(|e| panic!("Cycle {}: connect failed: {}", i, e));
         zk.disconnect()
@@ -583,7 +569,7 @@ fn stress_cmd_exit_always_sent() {
     // Second half: let Drop auto-disconnect
     for i in half..cycles {
         let mut zk = ZK::new("127.0.0.1", port);
-        zk.timeout = Duration::from_secs(5);
+        zk.set_timeout(Duration::from_secs(5));
         zk.connect(ZKProtocol::TCP)
             .unwrap_or_else(|e| panic!("Cycle {}: connect failed: {}", i, e));
         // No explicit disconnect — Drop should handle it
