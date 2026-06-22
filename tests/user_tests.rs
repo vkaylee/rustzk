@@ -605,8 +605,8 @@ fn test_set_users_bulk_mock() {
 
 #[test]
 fn test_user_id_cache_invalidation_and_timezone_redundancy() {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     let _ = env_logger::builder().is_test(true).try_init();
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
@@ -688,7 +688,8 @@ fn test_user_id_cache_invalidation_and_timezone_redundancy() {
                         .unwrap();
                 }
                 CMD_GET_TIME => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![0, 0, 0, 0]);
+                    let res =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![0, 0, 0, 0]);
                     stream
                         .write_all(&TCPWrapper::wrap(&res.to_bytes()))
                         .unwrap();

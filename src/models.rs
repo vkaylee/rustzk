@@ -1,8 +1,8 @@
+use crate::constants::{USER_PACKET_SIZE_LARGE, USER_PACKET_SIZE_SMALL};
+use crate::{ZKError, ZKResult};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use std::io::{Cursor, Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{ZKResult, ZKError};
-use crate::constants::{USER_PACKET_SIZE_SMALL, USER_PACKET_SIZE_LARGE};
 
 /// Represents an attendance record (clock-in/out).
 #[derive(Debug, Clone)]
@@ -283,13 +283,7 @@ impl User {
             .to_string();
 
         Ok(User::new(
-            uid,
-            name,
-            privilege,
-            password,
-            group_id,
-            user_id,
-            card,
+            uid, name, privilege, password, group_id, user_id, card,
         ))
     }
 

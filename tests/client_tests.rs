@@ -1345,8 +1345,11 @@ fn test_udp_read_buffer_retry_mock() {
             let packet = ZKPacket::from_bytes(&buf[..len]).unwrap();
             match packet.command() {
                 CMD_CONNECT => {
-                    let res_packet = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    server_socket.send_to(&res_packet.to_bytes(), client_addr).unwrap();
+                    let res_packet =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
                 }
                 CMD_GET_FREE_SIZES => {
                     let mut bytes = Vec::new();
@@ -1354,16 +1357,22 @@ fn test_udp_read_buffer_retry_mock() {
                         let val = if i == 4 { 1 } else { 0 }; // 1 user
                         bytes.write_i32::<LittleEndian>(val).unwrap();
                     }
-                    let res_packet = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
-                    server_socket.send_to(&res_packet.to_bytes(), client_addr).unwrap();
+                    let res_packet =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
                 }
                 _CMD_PREPARE_BUFFER => {
                     let size: u32 = 4 + 28;
                     let mut res_payload = vec![0u8; 5];
                     res_payload[0] = 1;
                     LittleEndian::write_u32(&mut res_payload[1..5], size);
-                    let res_packet = ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id(), res_payload);
-                    server_socket.send_to(&res_packet.to_bytes(), client_addr).unwrap();
+                    let res_packet =
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id(), res_payload);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
                 }
                 _CMD_READ_BUFFER => {
                     read_buffer_attempts += 1;
@@ -1387,15 +1396,23 @@ fn test_udp_read_buffer_retry_mock() {
                     data.write_u32::<LittleEndian>(101).unwrap(); // UserID
 
                     let res_packet = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), data);
-                    server_socket.send_to(&res_packet.to_bytes(), client_addr).unwrap();
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
                 }
                 CMD_FREE_DATA => {
-                    let res_packet = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    server_socket.send_to(&res_packet.to_bytes(), client_addr).unwrap();
+                    let res_packet =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
                 }
                 CMD_EXIT => {
-                    let res_packet = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    server_socket.send_to(&res_packet.to_bytes(), client_addr).unwrap();
+                    let res_packet =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
                     break;
                 }
                 _ => {}

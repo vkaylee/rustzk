@@ -1,8 +1,8 @@
-use chrono::{DateTime, FixedOffset, TimeZone};
 use byteorder::{ByteOrder, LittleEndian};
+use chrono::{DateTime, FixedOffset, TimeZone};
 
-use crate::{ZK, ZKError, ZKResult, ZKErrorCode};
 use crate::constants::*;
+use crate::{ZKError, ZKErrorCode, ZKResult, ZK};
 
 impl ZK {
     /// Fetches device capacity and usage statistics.
@@ -95,7 +95,8 @@ impl ZK {
                 ZKErrorCode::ProtocolViolation,
                 format!(
                     "Can't read option '{}' (Device returned CMD 0x{:X})",
-                    key, res.command()
+                    key,
+                    res.command()
                 ),
             ))
         }
@@ -112,14 +113,12 @@ impl ZK {
     /// Gets the device timezone adjustment (usually in hours).
     pub fn get_timezone(&mut self) -> ZKResult<i32> {
         let tz_str = self.get_option_value("TZAdj")?;
-        tz_str
-            .parse::<i32>()
-            .map_err(|_| {
-                ZKError::InvalidData(
-                    ZKErrorCode::InvalidDataFormat,
-                    format!("Invalid timezone value: {}", tz_str),
-                )
-            })
+        tz_str.parse::<i32>().map_err(|_| {
+            ZKError::InvalidData(
+                ZKErrorCode::InvalidDataFormat,
+                format!("Invalid timezone value: {}", tz_str),
+            )
+        })
     }
 
     pub fn get_mac(&mut self) -> ZKResult<String> {

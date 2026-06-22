@@ -1,10 +1,10 @@
+use byteorder::ByteOrder;
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::{ZKProtocol, ZK};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
-use byteorder::ByteOrder;
 
 #[test]
 fn test_max_discarded_packets_limit() {
@@ -133,16 +133,9 @@ fn test_calculate_checksum_on_raw_packet_buffer() {
 fn test_ambiguous_local_time_handling() {
     use chrono::NaiveDateTime;
     let naive = NaiveDateTime::parse_from_str("2026-02-19 09:16:41", "%Y-%m-%d %H:%M:%S").unwrap();
-    
+
     // Construct an Attendance record with normal timezone
-    let att = rustzk::models::Attendance::new(
-        1,
-        "101".to_string(),
-        naive,
-        1,
-        0,
-        420,
-    );
+    let att = rustzk::models::Attendance::new(1, "101".to_string(), naive, 1, 0, 420);
     let dt = att.timestamp_fixed();
     assert!(dt.is_some());
     assert_eq!(dt.unwrap().to_rfc3339(), "2026-02-19T09:16:41+07:00");
@@ -167,7 +160,9 @@ fn test_get_attendance_invalid_record_size() {
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes(&body).unwrap();
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
 
         // 2. Handle CMD_GET_FREE_SIZES (read_sizes)
         stream.read_exact(&mut header).unwrap();
@@ -182,7 +177,9 @@ fn test_get_attendance_invalid_record_size() {
         // self.records is at bytes 32..36
         byteorder::LittleEndian::write_i32(&mut sizes_payload[32..36], 1);
         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), sizes_payload);
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
 
         // 3. Handle TZAdj Option Query
         stream.read_exact(&mut header).unwrap();
@@ -190,8 +187,15 @@ fn test_get_attendance_invalid_record_size() {
         let mut body = vec![0u8; length];
         stream.read_exact(&mut body).unwrap();
         let packet = ZKPacket::from_bytes_owned(body).unwrap();
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), b"TZAdj=7\0".to_vec());
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+        let res = ZKPacket::new(
+            CMD_ACK_OK,
+            session_id,
+            packet.reply_id(),
+            b"TZAdj=7\0".to_vec(),
+        );
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
 
         // 4. Handle CMD_ATTLOG_RRQ (get_attendance)
         stream.read_exact(&mut header).unwrap();
@@ -207,7 +211,9 @@ fn test_get_attendance_invalid_record_size() {
         let mut bad_payload = vec![0u8; 9];
         byteorder::LittleEndian::write_u32(&mut bad_payload[0..4], 5);
         let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), bad_payload);
-        stream.write_all(&TCPWrapper::wrap(&res.to_bytes())).unwrap();
+        stream
+            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
+            .unwrap();
     });
 
     let mut zk = ZK::new("127.0.0.1", port);

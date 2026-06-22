@@ -161,7 +161,7 @@ fn start_live_mock_server_delayed(listener: TcpListener, session_id: u16) {
 
                     // Sleep 350ms to guarantee multiple client-side read timeouts (client timeout is 100ms)
                     thread::sleep(Duration::from_millis(350));
-                    
+
                     let mut d = vec![0u8; 32];
                     d[..13].copy_from_slice(b"RUST-USER-001");
                     d[24] = 1;
@@ -206,7 +206,7 @@ fn test_live_events_timeout_retry_mock() {
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let mut event_iter = zk.listen_events().unwrap();
-    // The call to next() will block, timeout several times, loop internally, 
+    // The call to next() will block, timeout several times, loop internally,
     // and finally yield the event when it arrives at ~350ms.
     let event = event_iter.next().unwrap().unwrap();
 

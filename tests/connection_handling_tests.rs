@@ -1,6 +1,6 @@
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
-use rustzk::{ZKProtocol, ZK, ZKError};
+use rustzk::{ZKError, ZKProtocol, ZK};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
@@ -328,8 +328,14 @@ fn test_zkerror_helper_methods() {
 
     let timeout_io = ZKError::Network(io::Error::new(io::ErrorKind::TimedOut, "timeout"));
     let would_block_io = ZKError::Network(io::Error::new(io::ErrorKind::WouldBlock, "would block"));
-    let connection_timeout = ZKError::Connection(rustzk::ZKErrorCode::Timeout, "Connection timeout occurred".into());
-    let response_timeout = ZKError::Response(rustzk::ZKErrorCode::Timeout, "TimedOut waiting for packet".into());
+    let connection_timeout = ZKError::Connection(
+        rustzk::ZKErrorCode::Timeout,
+        "Connection timeout occurred".into(),
+    );
+    let response_timeout = ZKError::Response(
+        rustzk::ZKErrorCode::Timeout,
+        "TimedOut waiting for packet".into(),
+    );
     let _unrelated_io = ZKError::Network(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));
 
     assert!(timeout_io.is_timeout());
@@ -337,8 +343,14 @@ fn test_zkerror_helper_methods() {
     assert!(connection_timeout.is_timeout());
     assert!(response_timeout.is_timeout());
 
-    let unauthorized_conn = ZKError::Connection(rustzk::ZKErrorCode::Unauthorized, "Unauthorized: Password required or incorrect".into());
-    let unrelated_conn = ZKError::Connection(rustzk::ZKErrorCode::ConnectionFailed, "Network unreachable".into());
+    let unauthorized_conn = ZKError::Connection(
+        rustzk::ZKErrorCode::Unauthorized,
+        "Unauthorized: Password required or incorrect".into(),
+    );
+    let unrelated_conn = ZKError::Connection(
+        rustzk::ZKErrorCode::ConnectionFailed,
+        "Network unreachable".into(),
+    );
 
     assert!(unauthorized_conn.is_unauthorized());
     assert!(!unrelated_conn.is_unauthorized());
@@ -353,7 +365,7 @@ fn test_zk_is_alive_timeout_handling() {
 
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept");
-        
+
         // Handle connect
         let mut header = [0u8; 8];
         if stream.read_exact(&mut header).is_ok() {
@@ -364,7 +376,7 @@ fn test_zk_is_alive_timeout_handling() {
             let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
             let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
         }
-        
+
         // For subsequent requests (like CMD_GET_TIME in is_alive), we just do nothing
         // to simulate a silent/hung connection
         thread::sleep(Duration::from_secs(5));
@@ -382,7 +394,11 @@ fn test_zk_is_alive_timeout_handling() {
 
     assert!(!alive);
     assert!(!zk.is_connected());
-    assert!(elapsed < Duration::from_secs(4), "is_alive should time out in ~2s, took {:?}", elapsed);
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "is_alive should time out in ~2s, took {:?}",
+        elapsed
+    );
 }
 
 /// Test: TCP stream recovery immediately closes transport on framing error.
@@ -394,7 +410,7 @@ fn test_tcp_framing_deserialization_recovery() {
 
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept");
-        
+
         // Handle connect
         let mut header = [0u8; 8];
         if stream.read_exact(&mut header).is_ok() {
@@ -454,5 +470,9 @@ fn test_zk_drop_non_blocking() {
     std::mem::drop(zk);
     let elapsed = start.elapsed();
 
-    assert!(elapsed < Duration::from_millis(50), "Drop took {:?}, should be near-instant (non-blocking)", elapsed);
+    assert!(
+        elapsed < Duration::from_millis(50),
+        "Drop took {:?}, should be near-instant (non-blocking)",
+        elapsed
+    );
 }

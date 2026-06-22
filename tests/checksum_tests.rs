@@ -354,7 +354,7 @@ fn test_incoming_checksum_mismatch_rejected() {
 
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        
+
         // Read CMD_CONNECT
         let mut header = [0u8; 8];
         stream.read_exact(&mut header).unwrap();
@@ -370,23 +370,26 @@ fn test_incoming_checksum_mismatch_rejected() {
         res_bytes[2] ^= 0xFF; // Corrupt checksum
         res_bytes[3] ^= 0xFF; // Corrupt checksum
 
-        stream
-            .write_all(&TCPWrapper::wrap(&res_bytes))
-            .unwrap();
+        stream.write_all(&TCPWrapper::wrap(&res_bytes)).unwrap();
         stream.flush().unwrap();
     });
 
     let mut zk = ZK::new("127.0.0.1", port);
     let result = zk.connect(ZKProtocol::TCP);
 
-    assert!(result.is_err(), "Client should reject packet with invalid checksum");
+    assert!(
+        result.is_err(),
+        "Client should reject packet with invalid checksum"
+    );
     match result.unwrap_err() {
         rustzk::ZKError::InvalidData(rustzk::ZKErrorCode::ChecksumMismatch, msg) => {
             assert!(msg.contains("Invalid packet checksum"));
         }
-        other => panic!("Expected ZKError::InvalidData with ZKErrorCode::ChecksumMismatch, got: {:?}", other),
+        other => panic!(
+            "Expected ZKError::InvalidData with ZKErrorCode::ChecksumMismatch, got: {:?}",
+            other
+        ),
     }
 
     server.join().unwrap();
 }
-

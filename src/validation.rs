@@ -3,7 +3,7 @@
 //! This module provides comprehensive validation for all network inputs
 //! to ensure security and prevent malformed data attacks.
 
-use crate::{ZKError, ZKResult, ZKErrorCode};
+use crate::{ZKError, ZKErrorCode, ZKResult};
 
 /// Validates protocol header fields
 ///
@@ -42,10 +42,7 @@ pub fn validate_protocol_header(header: &[u8]) -> ZKResult<()> {
         if version != 0x01 && version != 0x02 {
             return Err(ZKError::InvalidData(
                 ZKErrorCode::ProtocolViolation,
-                format!(
-                    "Unsupported protocol version: 0x{:02x}",
-                    version
-                ),
+                format!("Unsupported protocol version: 0x{:02x}", version),
             ));
         }
     }
@@ -73,10 +70,7 @@ pub fn validate_command(command: u8) -> ZKResult<()> {
     if !VALID_COMMANDS.contains(&command) {
         return Err(ZKError::InvalidData(
             ZKErrorCode::ProtocolViolation,
-            format!(
-                "Unknown command code: 0x{:02x}",
-                command
-            ),
+            format!("Unknown command code: 0x{:02x}", command),
         ));
     }
 

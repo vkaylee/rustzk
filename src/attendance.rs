@@ -1,11 +1,11 @@
-use std::io::{self, Read, Write};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{self, Read, Write};
 
-use crate::{ZK, ZKError, ZKResult, ZKErrorCode};
-use crate::models::Attendance;
 use crate::constants::*;
-use crate::transport::ZKTransport;
+use crate::models::Attendance;
 use crate::protocol::ZKPacket;
+use crate::transport::ZKTransport;
+use crate::{ZKError, ZKErrorCode, ZKResult, ZK};
 
 impl ZK {
     /// Retrieves all attendance records from the device.
@@ -44,10 +44,12 @@ impl ZK {
             if total_size.is_multiple_of(40) && (record_size == 0 || record_size.is_multiple_of(40))
             {
                 record_size = 40;
-            } else if total_size.is_multiple_of(16) && (record_size == 0 || record_size.is_multiple_of(16))
+            } else if total_size.is_multiple_of(16)
+                && (record_size == 0 || record_size.is_multiple_of(16))
             {
                 record_size = 16;
-            } else if total_size.is_multiple_of(8) && (record_size == 0 || record_size.is_multiple_of(8))
+            } else if total_size.is_multiple_of(8)
+                && (record_size == 0 || record_size.is_multiple_of(8))
             {
                 record_size = 8;
             }
@@ -55,11 +57,16 @@ impl ZK {
 
         let data = &attendance_data[4..];
 
-        let mut attendances = Vec::with_capacity(std::cmp::min(self.records as usize, data.len() / record_size));
+        let mut attendances = Vec::with_capacity(std::cmp::min(
+            self.records as usize,
+            data.len() / record_size,
+        ));
         let mut offset = 0;
 
-        let mut uid_cache: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
-        let mut bytes_cache: std::collections::HashMap<[u8; 24], String> = std::collections::HashMap::new();
+        let mut uid_cache: std::collections::HashMap<u32, String> =
+            std::collections::HashMap::new();
+        let mut bytes_cache: std::collections::HashMap<[u8; 24], String> =
+            std::collections::HashMap::new();
 
         let mut parsed = false;
 
@@ -179,7 +186,10 @@ impl ZK {
         if !parsed {
             return Err(ZKError::InvalidData(
                 ZKErrorCode::InvalidDataFormat,
-                format!("Unsupported or invalid attendance record size: {}", record_size),
+                format!(
+                    "Unsupported or invalid attendance record size: {}",
+                    record_size
+                ),
             ));
         }
 
@@ -197,29 +207,25 @@ impl ZK {
         } else {
             Err(ZKError::Response(
                 ZKErrorCode::ProtocolViolation,
-                format!(
-                    "Failed to register events with flags {}",
-                    flags
-                ),
+                format!("Failed to register events with flags {}", flags),
             ))
         }
     }
 
     /// Internal helper to send a simple ACK_OK response.
     pub(crate) fn send_ack_ok(&mut self) -> ZKResult<()> {
-        let transport = self
-            .transport
-            .as_mut()
-            .ok_or_else(|| {
-                ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
-            })?;
+        let transport = self.transport.as_mut().ok_or_else(|| {
+            ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
+        })?;
         let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, &[]);
 
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
                 self.write_buf.clear();
-                self.write_buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
-                self.write_buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
+                self.write_buf
+                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
+                self.write_buf
+                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
                 self.write_buf.write_u32::<LittleEndian>(8)?;
                 packet.to_bytes_into(&mut self.write_buf)?;
                 reader.get_mut().write_all(&self.write_buf)?;

@@ -5,19 +5,19 @@
 
 pub mod constants;
 pub use crate::constants::*;
+pub mod attendance;
+pub mod device;
 pub mod models;
 pub mod protocol;
 pub mod security;
 pub mod transport;
 pub mod user;
-pub mod attendance;
-pub mod device;
 
+use byteorder::ReadBytesExt;
+use chrono::{Datelike, Timelike};
 use std::io;
 use std::time::Duration;
 use thiserror::Error;
-use byteorder::ReadBytesExt;
-use chrono::{Datelike, Timelike};
 
 pub use crate::transport::ZKTransport;
 
@@ -54,7 +54,8 @@ impl ZKError {
     pub fn is_timeout(&self) -> bool {
         match self {
             ZKError::Network(err) => {
-                err.kind() == std::io::ErrorKind::TimedOut || err.kind() == std::io::ErrorKind::WouldBlock
+                err.kind() == std::io::ErrorKind::TimedOut
+                    || err.kind() == std::io::ErrorKind::WouldBlock
             }
             ZKError::Connection(code, _) | ZKError::Response(code, _) => {
                 *code == ZKErrorCode::Timeout
@@ -288,10 +289,7 @@ impl ZK {
         chrono::NaiveDate::from_ymd_opt(year, month, day)
             .and_then(|d: chrono::NaiveDate| d.and_hms_opt(hour, minute, second))
             .ok_or_else(|| {
-                ZKError::InvalidData(
-                    ZKErrorCode::InvalidDataFormat,
-                    "Invalid date/time".into(),
-                )
+                ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, "Invalid date/time".into())
             })
     }
 

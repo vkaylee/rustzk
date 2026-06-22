@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use byteorder::{ByteOrder, LittleEndian};
+use std::collections::HashMap;
 
-use crate::{ZK, ZKError, ZKResult, ZKErrorCode};
-use crate::models::{User, Finger};
 use crate::constants::*;
+use crate::models::{Finger, User};
+use crate::{ZKError, ZKErrorCode, ZKResult, ZK};
 
 impl ZK {
     /// Retrieves all users from the device.
@@ -34,7 +34,10 @@ impl ZK {
         self.user_packet_size = total_size / self.users as usize;
         let data = &userdata[4..];
 
-        let mut users = Vec::with_capacity(std::cmp::min(self.users as usize, data.len() / self.user_packet_size));
+        let mut users = Vec::with_capacity(std::cmp::min(
+            self.users as usize,
+            data.len() / self.user_packet_size,
+        ));
         let mut offset = 0;
 
         if self.user_packet_size == USER_PACKET_SIZE_SMALL {
@@ -76,12 +79,16 @@ impl ZK {
         // 2. Safety Check: Ensure this User ID doesn't already exist under a DIFFERENT UID.
         // If it exists under the SAME UID, it's an update, which is allowed.
         if let Some(ref cache) = self.user_id_cache {
-            if let Some((&existing_uid, _)) = cache.iter().find(|(&uid, id)| *id == user.user_id() && uid != user.uid()) {
+            if let Some((&existing_uid, _)) = cache
+                .iter()
+                .find(|(&uid, id)| *id == user.user_id() && uid != user.uid())
+            {
                 return Err(ZKError::Response(
                     ZKErrorCode::DataConflict,
                     format!(
                         "Conflict: User ID '{}' already exists on the device at UID {}",
-                        user.user_id(), existing_uid
+                        user.user_id(),
+                        existing_uid
                     ),
                 ));
             }
@@ -106,12 +113,16 @@ impl ZK {
         // 2. Perform uniqueness checks for the entire batch using local cache
         if let Some(ref mut cache) = self.user_id_cache {
             for user in users {
-                if let Some((&existing_uid, _)) = cache.iter().find(|(&uid, id)| *id == user.user_id() && uid != user.uid()) {
+                if let Some((&existing_uid, _)) = cache
+                    .iter()
+                    .find(|(&uid, id)| *id == user.user_id() && uid != user.uid())
+                {
                     return Err(ZKError::Response(
                         ZKErrorCode::DataConflict,
                         format!(
                             "Conflict in batch: User ID '{}' already exists on device at UID {}",
-                            user.user_id(), existing_uid
+                            user.user_id(),
+                            existing_uid
                         ),
                     ));
                 }
@@ -215,7 +226,8 @@ impl ZK {
             ));
         }
         let mut data = &templatedata[4..];
-        let mut templates = Vec::with_capacity(std::cmp::min(self.fingers as usize, data.len() / 6));
+        let mut templates =
+            Vec::with_capacity(std::cmp::min(self.fingers as usize, data.len() / 6));
 
         while total_size > 0 && data.len() >= 6 {
             let size = LittleEndian::read_u16(&data[0..2]) as usize;
@@ -228,12 +240,7 @@ impl ZK {
             }
 
             let template = data[6..size].to_vec();
-            templates.push(Finger::new(
-                uid,
-                fid,
-                valid,
-                template,
-            ));
+            templates.push(Finger::new(uid, fid, valid, template));
 
             data = &data[size..];
             if total_size >= size {
@@ -261,12 +268,7 @@ impl ZK {
                 while template.ends_with(&[0]) && !template.is_empty() {
                     template.pop();
                 }
-                return Ok(Some(Finger::new(
-                    uid,
-                    fid,
-                    1,
-                    template,
-                )));
+                return Ok(Some(Finger::new(uid, fid, 1, template)));
             }
         }
         Ok(None)
@@ -311,7 +313,10 @@ impl ZK {
     pub(crate) fn get_user_id_from_cache(&mut self, uid: u16) -> String {
         if self.user_id_cache.is_none() {
             if let Err(e) = self.refresh_user_cache() {
-                log::warn!("Failed to refresh user cache: {}. Falling back to default mappings.", e);
+                log::warn!(
+                    "Failed to refresh user cache: {}. Falling back to default mappings.",
+                    e
+                );
                 // Initialize cache to empty map to prevent infinite retry loops on network timeout
                 self.user_id_cache = Some(HashMap::new());
             }

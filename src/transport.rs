@@ -1,11 +1,11 @@
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
-use crate::{ZK, ZKError, ZKResult, ZKProtocol, ZKErrorCode};
-use crate::protocol::{TCPWrapper, ZKPacket};
 use crate::constants::*;
+use crate::protocol::{TCPWrapper, ZKPacket};
+use crate::{ZKError, ZKErrorCode, ZKProtocol, ZKResult, ZK};
 
 pub enum ZKTransport {
     Tcp(std::io::BufReader<TcpStream>),
@@ -151,12 +151,9 @@ impl ZK {
     }
 
     pub(crate) fn read_packet(&mut self) -> ZKResult<ZKPacket<'static>> {
-        let transport = self
-            .transport
-            .as_mut()
-            .ok_or_else(|| {
-                ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
-            })?;
+        let transport = self.transport.as_mut().ok_or_else(|| {
+            ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
+        })?;
 
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
@@ -165,10 +162,12 @@ impl ZK {
                     // Read the first chunk (up to 8 bytes). If this blocks or times out,
                     // 0 bytes have been consumed, so we are still in sync.
                     let n = match reader.read(&mut header[..]) {
-                        Ok(0) => return Err(ZKError::Network(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
-                            "TCP connection closed (EOF)",
-                        ))),
+                        Ok(0) => {
+                            return Err(ZKError::Network(std::io::Error::new(
+                                std::io::ErrorKind::UnexpectedEof,
+                                "TCP connection closed (EOF)",
+                            )))
+                        }
                         Ok(n) => n,
                         Err(e) => return Err(ZKError::Network(e)),
                     };
@@ -186,8 +185,9 @@ impl ZK {
                         header[n..8].copy_from_slice(&rest);
                     }
 
-                    let (length, _) = TCPWrapper::decode_header(&header)
-                        .map_err(|e| ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, e.to_string()))?;
+                    let (length, _) = TCPWrapper::decode_header(&header).map_err(|e| {
+                        ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, e.to_string())
+                    })?;
 
                     crate::security::validate_packet_size(length)?;
 
@@ -196,7 +196,10 @@ impl ZK {
                     if let Err(e) = reader.read_exact(&mut body) {
                         return Err(ZKError::Network(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            format!("TCP desync: failed to read body of size {}: {:?}", length, e),
+                            format!(
+                                "TCP desync: failed to read body of size {}: {:?}",
+                                length, e
+                            ),
                         )));
                     }
 
@@ -214,12 +217,16 @@ impl ZK {
                 if let Err(ref e) = res {
                     let is_timeout = match e {
                         ZKError::Network(io_err) => {
-                            io_err.kind() == std::io::ErrorKind::TimedOut || io_err.kind() == std::io::ErrorKind::WouldBlock
+                            io_err.kind() == std::io::ErrorKind::TimedOut
+                                || io_err.kind() == std::io::ErrorKind::WouldBlock
                         }
                         _ => false,
                     };
                     if !is_timeout {
-                        log::warn!("TCP stream error (hard failure or desync). Closing transport: {:?}", e);
+                        log::warn!(
+                            "TCP stream error (hard failure or desync). Closing transport: {:?}",
+                            e
+                        );
                         self.is_connected = false;
                         self.transport = None;
                     }
@@ -305,19 +312,19 @@ impl ZK {
             ZKPacket::new(command, self.session_id, self.reply_id, payload)
         };
 
-        let transport = self
-            .transport
-            .as_mut()
-            .ok_or_else(|| {
-                ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
-            })?;
+        let transport = self.transport.as_mut().ok_or_else(|| {
+            ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
+        })?;
 
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
                 self.write_buf.clear();
-                self.write_buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
-                self.write_buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
-                self.write_buf.write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
+                self.write_buf
+                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
+                self.write_buf
+                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
+                self.write_buf
+                    .write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
                 packet.to_bytes_into(&mut self.write_buf)?;
                 reader.get_mut().write_all(&self.write_buf)?;
             }
@@ -377,10 +384,7 @@ impl ZK {
                 } else {
                     return Err(ZKError::Response(
                         ZKErrorCode::ProtocolViolation,
-                        format!(
-                            "Unexpected chunk command: 0x{:X}",
-                            chunk_res.command()
-                        ),
+                        format!("Unexpected chunk command: 0x{:X}", chunk_res.command()),
                     ));
                 }
             }
@@ -438,14 +442,16 @@ impl ZK {
             }
         }
         Err(last_error.unwrap_or_else(|| {
-            ZKError::Response(
-                ZKErrorCode::ProtocolViolation,
-                "Chunk read failed".into(),
-            )
+            ZKError::Response(ZKErrorCode::ProtocolViolation, "Chunk read failed".into())
         }))
     }
 
-    pub(crate) fn read_with_buffer(&mut self, command: u16, fct: u32, size: u32) -> ZKResult<Vec<u8>> {
+    pub(crate) fn read_with_buffer(
+        &mut self,
+        command: u16,
+        fct: u32,
+        size: u32,
+    ) -> ZKResult<Vec<u8>> {
         let mut payload = [0u8; 11];
         payload[0] = 1;
         LittleEndian::write_u16(&mut payload[1..3], command);
@@ -464,10 +470,7 @@ impl ZK {
         } else {
             return Err(ZKError::Response(
                 ZKErrorCode::InvalidDataFormat,
-                format!(
-                    "Invalid response size length: {}",
-                    res.payload().len()
-                ),
+                format!("Invalid response size length: {}", res.payload().len()),
             ));
         };
 
@@ -567,13 +570,12 @@ impl ZK {
                 format!("Failed to resolve address {}: {}", self.addr, e),
             )
         })?;
-        let addr = addrs
-            .into_iter()
-            .next()
-            .ok_or_else(|| ZKError::Connection(
+        let addr = addrs.into_iter().next().ok_or_else(|| {
+            ZKError::Connection(
                 ZKErrorCode::ConnectionFailed,
-                format!("No address found for {}", self.addr)
-            ))?;
+                format!("No address found for {}", self.addr),
+            )
+        })?;
 
         let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
         stream.set_nodelay(true)?;
@@ -627,9 +629,12 @@ impl ZK {
             match transport {
                 ZKTransport::Tcp(ref mut reader) => {
                     self.write_buf.clear();
-                    self.write_buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
-                    self.write_buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
-                    self.write_buf.write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
+                    self.write_buf
+                        .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
+                    self.write_buf
+                        .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
+                    self.write_buf
+                        .write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
                     packet.to_bytes_into(&mut self.write_buf)?;
                     reader.get_mut().write_all(&self.write_buf)?;
                 }
