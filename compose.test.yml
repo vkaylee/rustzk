@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  rust:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: rustzk-test:latest
+    volumes:
+      - .:/workspace
+      - ${HOME}/.cargo/registry:/usr/local/cargo/registry
+      - target-cache:/workspace/target
+    working_dir: /workspace
+    entrypoint: ["cargo"]
+    environment:
+      - CARGO_HOME=/usr/local/cargo
+
+volumes:
+  target-cache:
+    name: rustzk_target-cache

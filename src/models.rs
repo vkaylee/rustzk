@@ -4,17 +4,17 @@ use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 #[derive(Debug, Clone)]
 pub struct Attendance {
     /// Internal record UID (sequence number).
-    pub(crate) uid: u32,
+    uid: u32,
     /// The user ID string associated with the record.
-    pub(crate) user_id: String,
+    user_id: String,
     /// The raw timestamp from the device.
-    pub(crate) timestamp: NaiveDateTime,
+    timestamp: NaiveDateTime,
     /// Attendance status code.
-    pub(crate) status: u8,
+    status: u8,
     /// Punch type (e.g., finger, face, card).
-    pub(crate) punch: u8,
+    punch: u8,
     /// The timezone offset in minutes applied to this record.
-    pub(crate) timezone_offset: i32,
+    timezone_offset: i32,
 }
 
 impl Attendance {
@@ -107,19 +107,19 @@ impl Attendance {
 #[derive(Debug, Clone)]
 pub struct User {
     /// Internal user UID.
-    pub(crate) uid: u16,
+    uid: u16,
     /// User's display name.
-    pub(crate) name: String,
+    name: String,
     /// User's privilege level (Admin, User, etc.).
-    pub(crate) privilege: u8,
+    privilege: u8,
     /// User's numeric password (if any).
-    pub(crate) password: String,
+    password: String,
     /// ID of the group the user belongs to.
-    pub(crate) group_id: String,
+    group_id: String,
     /// The alphanumeric user ID string.
-    pub(crate) user_id: String,
+    user_id: String,
     /// ID of the proximity card assigned to the user.
-    pub(crate) card: u32,
+    card: u32,
 }
 
 impl User {
@@ -204,13 +204,13 @@ impl User {
 #[derive(Debug, Clone)]
 pub struct Finger {
     /// UID of the user this finger belongs to.
-    pub(crate) uid: u16,
+    uid: u16,
     /// Finger ID (0-9).
-    pub(crate) fid: u8,
+    fid: u8,
     /// Whether the template is valid.
-    pub(crate) valid: u8,
+    valid: u8,
     /// The raw binary fingerprint template data.
-    pub(crate) template: Vec<u8>,
+    template: Vec<u8>,
 }
 
 impl Finger {
