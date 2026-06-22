@@ -1,20 +1,24 @@
+use crate::constants::{USER_PACKET_SIZE_LARGE, USER_PACKET_SIZE_SMALL};
+use crate::{ZKError, ZKResult};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
+use std::io::{Cursor, Read, Write};
 
 /// Represents an attendance record (clock-in/out).
 #[derive(Debug, Clone)]
 pub struct Attendance {
     /// Internal record UID (sequence number).
-    pub(crate) uid: u32,
+    uid: u32,
     /// The user ID string associated with the record.
-    pub(crate) user_id: String,
+    user_id: String,
     /// The raw timestamp from the device.
-    pub(crate) timestamp: NaiveDateTime,
+    timestamp: NaiveDateTime,
     /// Attendance status code.
-    pub(crate) status: u8,
+    status: u8,
     /// Punch type (e.g., finger, face, card).
-    pub(crate) punch: u8,
+    punch: u8,
     /// The timezone offset in minutes applied to this record.
-    pub(crate) timezone_offset: i32,
+    timezone_offset: i32,
 }
 
 impl Attendance {
@@ -76,10 +80,16 @@ impl Attendance {
             return None;
         }
         let offset = FixedOffset::east_opt(self.timezone_offset * 60).unwrap_or_else(|| {
-            #[allow(clippy::unwrap_used)]
-            FixedOffset::east_opt(0).unwrap()
+            match FixedOffset::east_opt(0) {
+                Some(o) => o,
+                None => unreachable!(),
+            }
         });
-        offset.from_local_datetime(&self.timestamp).single()
+        match offset.from_local_datetime(&self.timestamp) {
+            chrono::LocalResult::Single(dt) => Some(dt),
+            chrono::LocalResult::Ambiguous(dt1, _) => Some(dt1),
+            chrono::LocalResult::None => None,
+        }
     }
 
     /// Returns the timestamp in UTC.
@@ -107,19 +117,19 @@ impl Attendance {
 #[derive(Debug, Clone)]
 pub struct User {
     /// Internal user UID.
-    pub(crate) uid: u16,
+    uid: u16,
     /// User's display name.
-    pub(crate) name: String,
+    name: String,
     /// User's privilege level (Admin, User, etc.).
-    pub(crate) privilege: u8,
+    privilege: u8,
     /// User's numeric password (if any).
-    pub(crate) password: String,
+    password: String,
     /// ID of the group the user belongs to.
-    pub(crate) group_id: String,
+    group_id: String,
     /// The alphanumeric user ID string.
-    pub(crate) user_id: String,
+    user_id: String,
     /// ID of the proximity card assigned to the user.
-    pub(crate) card: u32,
+    card: u32,
 }
 
 impl User {
@@ -198,19 +208,164 @@ impl User {
     pub fn user_type(&self) -> u8 {
         self.privilege & 0xE
     }
+
+    /// Parses a User from a 28-byte raw chunk.
+    pub fn parse_small(chunk: &[u8]) -> ZKResult<Self> {
+        if chunk.len() < USER_PACKET_SIZE_SMALL {
+            return Err(ZKError::InvalidData(
+                crate::ZKErrorCode::InvalidDataFormat,
+                "User small chunk too short".into(),
+            ));
+        }
+        let mut rdr = Cursor::new(chunk);
+        let uid = rdr.read_u16::<LittleEndian>()?;
+        let privilege = rdr.read_u8()?;
+        let mut password_bytes = [0u8; 5];
+        rdr.read_exact(&mut password_bytes)?;
+        let mut name_bytes = [0u8; 8];
+        rdr.read_exact(&mut name_bytes)?;
+        let card = rdr.read_u32::<LittleEndian>()?;
+        let _pad = rdr.read_u8()?;
+        let group_id = rdr.read_u8()?;
+        let _timezone = rdr.read_u16::<LittleEndian>()?;
+        let user_id = rdr.read_u32::<LittleEndian>()?;
+
+        // Decode name (GBK)
+        let name = crate::ZK::decode_gbk(&name_bytes);
+        let password = String::from_utf8_lossy(&password_bytes)
+            .trim_matches('\0')
+            .to_string();
+
+        Ok(User::new(
+            uid,
+            name,
+            privilege,
+            password,
+            group_id.to_string(),
+            user_id.to_string(),
+            card,
+        ))
+    }
+
+    /// Parses a User from a 72-byte raw chunk.
+    pub fn parse_large(chunk: &[u8]) -> ZKResult<Self> {
+        if chunk.len() < USER_PACKET_SIZE_LARGE {
+            return Err(ZKError::InvalidData(
+                crate::ZKErrorCode::InvalidDataFormat,
+                "User large chunk too short".into(),
+            ));
+        }
+        let mut rdr = Cursor::new(chunk);
+        let uid = rdr.read_u16::<LittleEndian>()?;
+        let privilege = rdr.read_u8()?;
+        let mut password_bytes = [0u8; 8];
+        rdr.read_exact(&mut password_bytes)?;
+        let mut name_bytes = [0u8; 24];
+        rdr.read_exact(&mut name_bytes)?;
+        let card = rdr.read_u32::<LittleEndian>()?;
+        let _pad1 = rdr.read_u8()?;
+        let mut group_id_bytes = [0u8; 7];
+        rdr.read_exact(&mut group_id_bytes)?;
+        let _pad2 = rdr.read_u8()?;
+        let mut user_id_bytes = [0u8; 24];
+        rdr.read_exact(&mut user_id_bytes)?;
+
+        // Decode name (GBK)
+        let name = crate::ZK::decode_gbk(&name_bytes);
+        let password = String::from_utf8_lossy(&password_bytes)
+            .trim_matches('\0')
+            .to_string();
+        let group_id = String::from_utf8_lossy(&group_id_bytes)
+            .trim_matches('\0')
+            .to_string();
+        let user_id = String::from_utf8_lossy(&user_id_bytes)
+            .trim_matches('\0')
+            .to_string();
+
+        Ok(User::new(
+            uid, name, privilege, password, group_id, user_id, card,
+        ))
+    }
+
+    /// Serializes the user into a 28-byte raw vector.
+    pub fn to_bytes_small(&self) -> ZKResult<Vec<u8>> {
+        let mut payload = Vec::with_capacity(USER_PACKET_SIZE_SMALL);
+        payload.write_u16::<LittleEndian>(self.uid)?;
+        payload.write_u8(self.privilege)?;
+
+        let mut password_bytes = [0u8; 5];
+        let p_bytes = self.password.as_bytes();
+        let p_len = std::cmp::min(p_bytes.len(), 5);
+        password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
+        payload.write_all(&password_bytes)?;
+
+        let mut name_bytes = [0u8; 8];
+        let n_bytes_gbk = encoding_rs::GBK.encode(&self.name).0;
+        let n_len = std::cmp::min(n_bytes_gbk.len(), 8);
+        name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
+        payload.write_all(&name_bytes)?;
+
+        payload.write_u32::<LittleEndian>(self.card)?;
+        payload.write_u8(0)?; // pad
+        let group_id = self.group_id.parse::<u8>().unwrap_or(0);
+        payload.write_u8(group_id)?;
+        payload.write_u16::<LittleEndian>(0)?; // timezone/pad
+        let user_id_num = self.user_id.parse::<u32>().unwrap_or(0);
+        payload.write_u32::<LittleEndian>(user_id_num)?;
+
+        Ok(payload)
+    }
+
+    /// Serializes the user into a 72-byte raw vector.
+    pub fn to_bytes_large(&self) -> ZKResult<Vec<u8>> {
+        let mut payload = Vec::with_capacity(USER_PACKET_SIZE_LARGE);
+        payload.write_u16::<LittleEndian>(self.uid)?;
+        payload.write_u8(self.privilege)?;
+
+        let mut password_bytes = [0u8; 8];
+        let p_bytes = self.password.as_bytes();
+        let p_len = std::cmp::min(p_bytes.len(), 8);
+        password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
+        payload.write_all(&password_bytes)?;
+
+        let mut name_bytes = [0u8; 24];
+        let n_bytes_gbk = encoding_rs::GBK.encode(&self.name).0;
+        let n_len = std::cmp::min(n_bytes_gbk.len(), 24);
+        name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
+        payload.write_all(&name_bytes)?;
+
+        payload.write_u32::<LittleEndian>(self.card)?;
+        payload.write_u8(0)?; // pad1
+
+        let mut group_id_bytes = [0u8; 7];
+        let g_bytes = self.group_id.as_bytes();
+        let g_len = std::cmp::min(g_bytes.len(), 7);
+        group_id_bytes[..g_len].copy_from_slice(&g_bytes[..g_len]);
+        payload.write_all(&group_id_bytes)?;
+
+        payload.write_u8(0)?; // pad2
+
+        let mut user_id_bytes = [0u8; 24];
+        let u_bytes = self.user_id.as_bytes();
+        let u_len = std::cmp::min(u_bytes.len(), 24);
+        user_id_bytes[..u_len].copy_from_slice(&u_bytes[..u_len]);
+        payload.write_all(&user_id_bytes)?;
+
+        Ok(payload)
+    }
 }
 
 /// Represents a fingerprint template.
 #[derive(Debug, Clone)]
 pub struct Finger {
     /// UID of the user this finger belongs to.
-    pub(crate) uid: u16,
+    uid: u16,
     /// Finger ID (0-9).
-    pub(crate) fid: u8,
+    fid: u8,
     /// Whether the template is valid.
-    pub(crate) valid: u8,
+    valid: u8,
     /// The raw binary fingerprint template data.
-    pub(crate) template: Vec<u8>,
+    template: Vec<u8>,
 }
 
 impl Finger {

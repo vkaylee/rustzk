@@ -3,7 +3,7 @@
 //! This module provides comprehensive validation for all network inputs
 //! to ensure security and prevent malformed data attacks.
 
-use crate::{ZKError, ZKResult};
+use crate::{ZKError, ZKErrorCode, ZKResult};
 
 /// Validates protocol header fields
 ///
@@ -17,6 +17,7 @@ pub fn validate_protocol_header(header: &[u8]) -> ZKResult<()> {
     // Ensure minimum header size
     if header.len() < 8 {
         return Err(ZKError::InvalidData(
+            ZKErrorCode::InvalidDataFormat,
             "Header too short: minimum 8 bytes required".into(),
         ));
     }
@@ -27,6 +28,7 @@ pub fn validate_protocol_header(header: &[u8]) -> ZKResult<()> {
     // Check for reasonable minimum size
     if length < 4 {
         return Err(ZKError::InvalidData(
+            ZKErrorCode::InvalidDataFormat,
             "Packet length too small: minimum 4 bytes required".into(),
         ));
     }
@@ -38,10 +40,10 @@ pub fn validate_protocol_header(header: &[u8]) -> ZKResult<()> {
     if header.len() > 8 {
         let version = header[8];
         if version != 0x01 && version != 0x02 {
-            return Err(ZKError::InvalidData(format!(
-                "Unsupported protocol version: 0x{:02x}",
-                version
-            )));
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::ProtocolViolation,
+                format!("Unsupported protocol version: 0x{:02x}", version),
+            ));
         }
     }
 
@@ -66,10 +68,10 @@ pub fn validate_command(command: u8) -> ZKResult<()> {
     ];
 
     if !VALID_COMMANDS.contains(&command) {
-        return Err(ZKError::InvalidData(format!(
-            "Unknown command code: 0x{:02x}",
-            command
-        )));
+        return Err(ZKError::InvalidData(
+            ZKErrorCode::ProtocolViolation,
+            format!("Unknown command code: 0x{:02x}", command),
+        ));
     }
 
     Ok(())
@@ -87,11 +89,14 @@ pub fn validate_command(command: u8) -> ZKResult<()> {
 pub fn validate_data_payload(data: &[u8], expected_min_size: usize) -> ZKResult<()> {
     // Check minimum size requirement
     if data.len() < expected_min_size {
-        return Err(ZKError::InvalidData(format!(
-            "Data payload too small: expected at least {} bytes, got {}",
-            expected_min_size,
-            data.len()
-        )));
+        return Err(ZKError::InvalidData(
+            ZKErrorCode::InvalidDataFormat,
+            format!(
+                "Data payload too small: expected at least {} bytes, got {}",
+                expected_min_size,
+                data.len()
+            ),
+        ));
     }
 
     // Validate size bounds
@@ -100,6 +105,7 @@ pub fn validate_data_payload(data: &[u8], expected_min_size: usize) -> ZKResult<
     // Check for null byte injection in string fields
     if data.windows(2).any(|window| window == [0x00, 0x00]) {
         return Err(ZKError::InvalidData(
+            ZKErrorCode::InvalidDataFormat,
             "Invalid null byte sequence in data payload".into(),
         ));
     }
@@ -119,6 +125,7 @@ pub fn validate_device_id(device_id: &[u8]) -> ZKResult<()> {
     // Device IDs should be reasonable length (typically < 32 bytes)
     if device_id.len() > 32 {
         return Err(ZKError::InvalidData(
+            ZKErrorCode::InvalidDataFormat,
             "Device ID too long: maximum 32 bytes".into(),
         ));
     }
@@ -126,6 +133,7 @@ pub fn validate_device_id(device_id: &[u8]) -> ZKResult<()> {
     // Device IDs should be printable ASCII or valid UTF-8
     if !device_id.iter().all(|&b| b.is_ascii_graphic() || b == 0) {
         return Err(ZKError::InvalidData(
+            ZKErrorCode::InvalidDataFormat,
             "Device ID contains invalid characters".into(),
         ));
     }
@@ -152,11 +160,14 @@ pub fn validate_network_packet(header: &[u8], data: &[u8], command: u8) -> ZKRes
     // Additional cross-field validation
     let header_length = u16::from_le_bytes([header[0], header[1]]) as usize;
     if header_length != data.len() {
-        return Err(ZKError::InvalidData(format!(
-            "Header length ({}) doesn't match data length ({})",
-            header_length,
-            data.len()
-        )));
+        return Err(ZKError::InvalidData(
+            ZKErrorCode::InvalidDataFormat,
+            format!(
+                "Header length ({}) doesn't match data length ({})",
+                header_length,
+                data.len()
+            ),
+        ));
     }
 
     Ok(())

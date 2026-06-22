@@ -6,3 +6,5 @@ package.json
 .ai-context-os/
 .cursorrules
 CLAUDE.md
+/logs/
+/coverage/

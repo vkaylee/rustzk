@@ -1321,3 +1321,115 @@ fn test_zk_is_alive_connected() {
     zk.disconnect().unwrap();
     server_handle.join().unwrap();
 }
+
+#[test]
+fn test_udp_read_buffer_retry_mock() {
+    use std::net::UdpSocket;
+    use std::time::Duration;
+
+    let server_socket = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind UDP mock");
+    let addr = server_socket.local_addr().unwrap();
+    let port = addr.port();
+
+    let server_handle = thread::spawn(move || {
+        let mut buf = [0u8; 1024];
+        let mut read_buffer_attempts = 0;
+        let session_id = 9999;
+
+        loop {
+            let (len, client_addr) = match server_socket.recv_from(&mut buf) {
+                Ok(res) => res,
+                Err(_) => break, // Socket closed/error
+            };
+
+            let packet = ZKPacket::from_bytes(&buf[..len]).unwrap();
+            match packet.command() {
+                CMD_CONNECT => {
+                    let res_packet =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
+                }
+                CMD_GET_FREE_SIZES => {
+                    let mut bytes = Vec::new();
+                    for i in 0..20 {
+                        let val = if i == 4 { 1 } else { 0 }; // 1 user
+                        bytes.write_i32::<LittleEndian>(val).unwrap();
+                    }
+                    let res_packet =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
+                }
+                _CMD_PREPARE_BUFFER => {
+                    let size: u32 = 4 + 28;
+                    let mut res_payload = vec![0u8; 5];
+                    res_payload[0] = 1;
+                    LittleEndian::write_u32(&mut res_payload[1..5], size);
+                    let res_packet =
+                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id(), res_payload);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
+                }
+                _CMD_READ_BUFFER => {
+                    read_buffer_attempts += 1;
+                    if read_buffer_attempts == 1 {
+                        // DROP the first attempt (do not send anything back)
+                        log::info!("Mock server: dropping UDP packet to force client retry");
+                        continue;
+                    }
+
+                    // Send actual user data on the second attempt
+                    let mut data = Vec::new();
+                    data.write_u32::<LittleEndian>(28).unwrap(); // Size prefix
+                    data.write_u16::<LittleEndian>(1).unwrap(); // UID
+                    data.push(USER_ADMIN); // Priv
+                    data.extend_from_slice(b"pwd\0\0"); // Pass (5)
+                    data.extend_from_slice(b"TestUsr\0"); // Name (8)
+                    data.write_u32::<LittleEndian>(0).unwrap(); // Card
+                    data.push(0); // Pad
+                    data.push(1); // Group
+                    data.write_u16::<LittleEndian>(0).unwrap(); // TZ
+                    data.write_u32::<LittleEndian>(101).unwrap(); // UserID
+
+                    let res_packet = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), data);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
+                }
+                CMD_FREE_DATA => {
+                    let res_packet =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
+                }
+                CMD_EXIT => {
+                    let res_packet =
+                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+                    server_socket
+                        .send_to(&res_packet.to_bytes(), client_addr)
+                        .unwrap();
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    // Set low timeout so the first attempt fails quickly (150ms)
+    zk.set_timeout(Duration::from_millis(150));
+    zk.connect(ZKProtocol::UDP).unwrap();
+
+    let users = zk.get_users().unwrap();
+    assert_eq!(users.len(), 1);
+    assert_eq!(users[0].name(), "TestUsr");
+    assert_eq!(users[0].user_id(), "101");
+
+    zk.disconnect().unwrap();
+    server_handle.join().unwrap();
+}

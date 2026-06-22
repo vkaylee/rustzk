@@ -35,10 +35,13 @@ pub fn get_max_packet_size() -> usize {
 pub fn validate_packet_size(size: usize) -> crate::ZKResult<()> {
     let max_size = get_max_packet_size();
     if size > max_size {
-        Err(crate::ZKError::InvalidData(format!(
-            "Packet size {} exceeds maximum allowed size {}",
-            size, max_size
-        )))
+        Err(crate::ZKError::InvalidData(
+            crate::ZKErrorCode::BufferOverflow,
+            format!(
+                "Packet size {} exceeds maximum allowed size {}",
+                size, max_size
+            ),
+        ))
     } else {
         Ok(())
     }

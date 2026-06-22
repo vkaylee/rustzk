@@ -17,6 +17,11 @@ pub fn calculate_checksum(data: &[u8]) -> u16 {
     let len = data.len();
 
     while i + 1 < len {
+        // Skip checksum field (bytes 2-3) if the slice represents a packet header
+        if len >= 8 && i == 2 {
+            i += 2;
+            continue;
+        }
         let val = u16::from_le_bytes([data[i], data[i + 1]]);
         checksum += val as u32;
         if checksum > USHRT_MAX as u32 {
@@ -48,15 +53,15 @@ pub fn calculate_checksum(data: &[u8]) -> u16 {
 #[derive(Debug, Clone)]
 pub struct ZKPacket<'a> {
     /// The command code (e.g., CMD_CONNECT).
-    pub(crate) command: u16,
+    command: u16,
     /// The packet checksum.
-    pub(crate) checksum: u16,
+    checksum: u16,
     /// The session ID allocated by the device.
-    pub(crate) session_id: u16,
+    session_id: u16,
     /// The reply ID for tracking request-response pairs.
-    pub(crate) reply_id: u16,
+    reply_id: u16,
     /// The raw payload of the command.
-    pub(crate) payload: Cow<'a, [u8]>,
+    payload: Cow<'a, [u8]>,
 }
 
 impl<'a> ZKPacket<'a> {
@@ -83,6 +88,21 @@ impl<'a> ZKPacket<'a> {
     /// Getter for payload.
     pub fn payload(&self) -> &[u8] {
         &self.payload
+    }
+
+    /// Consumes the packet and returns the payload Cow.
+    pub fn into_payload(self) -> Cow<'a, [u8]> {
+        self.payload
+    }
+
+    /// Verifies if the packet's checksum matches the calculated one.
+    pub fn verify_checksum(&self, use_legacy: bool) -> bool {
+        let expected = if use_legacy {
+            self.calculate_checksum_legacy()
+        } else {
+            self.calculate_checksum()
+        };
+        self.checksum == expected
     }
     /// Creates a new ZKPacket and automatically calculates the checksum
     /// using the **default** (Python pyzk-aligned) algorithm.
@@ -265,7 +285,10 @@ impl<'a> ZKPacket<'a> {
 
     pub fn from_bytes_owned(mut data: Vec<u8>) -> ZKResult<Self> {
         if data.len() < 8 {
-            return Err(ZKError::InvalidData("Packet too short".into()));
+            return Err(ZKError::InvalidData(
+                crate::ZKErrorCode::InvalidDataFormat,
+                "Packet too short".into(),
+            ));
         }
 
         let (command, checksum, session_id, reply_id) = {
