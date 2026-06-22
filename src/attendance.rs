@@ -1,7 +1,7 @@
 use std::io::{self, Read, Write};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::{ZK, ZKError, ZKResult};
+use crate::{ZK, ZKError, ZKResult, ZKErrorCode};
 use crate::models::Attendance;
 use crate::constants::*;
 use crate::transport::ZKTransport;
@@ -25,10 +25,13 @@ impl ZK {
 
         let total_size = LittleEndian::read_u32(&attendance_data[0..4]) as usize;
         if total_size > MAX_RESPONSE_SIZE {
-            return Err(ZKError::InvalidData(format!(
-                "Attendance data total_size {} exceeds maximum {}",
-                total_size, MAX_RESPONSE_SIZE
-            )));
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::BufferOverflow,
+                format!(
+                    "Attendance data total_size {} exceeds maximum {}",
+                    total_size, MAX_RESPONSE_SIZE
+                ),
+            ));
         }
         let mut record_size = if self.records > 0 && total_size > 0 {
             total_size / self.records as usize
@@ -52,8 +55,11 @@ impl ZK {
 
         let data = &attendance_data[4..];
 
-        let mut attendances = Vec::with_capacity(self.records as usize);
+        let mut attendances = Vec::with_capacity(std::cmp::min(self.records as usize, data.len() / record_size));
         let mut offset = 0;
+
+        let mut uid_cache: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+        let mut bytes_cache: std::collections::HashMap<[u8; 24], String> = std::collections::HashMap::new();
 
         if record_size == ATT_RECORD_SIZE_8
             || (record_size > 0
@@ -70,7 +76,13 @@ impl ZK {
                 let punch = rdr.read_u8()?;
 
                 let timestamp = ZK::decode_time(&time_bytes)?;
-                let user_id = self.get_user_id_from_cache(uid);
+                let user_id = if let Some(cached) = uid_cache.get(&(uid as u32)) {
+                    cached.clone()
+                } else {
+                    let id = self.get_user_id_from_cache(uid);
+                    uid_cache.insert(uid as u32, id.clone());
+                    id
+                };
 
                 attendances.push(Attendance::new(
                     uid as u32,
@@ -97,8 +109,14 @@ impl ZK {
                 let punch = rdr.read_u8()?;
 
                 let timestamp = ZK::decode_time(&time_bytes)?;
-                let user_id = user_id_num.to_string();
                 let uid = user_id_num;
+                let user_id = if let Some(cached) = uid_cache.get(&uid) {
+                    cached.clone()
+                } else {
+                    let id = user_id_num.to_string();
+                    uid_cache.insert(uid, id.clone());
+                    id
+                };
 
                 attendances.push(Attendance::new(
                     uid,
@@ -131,9 +149,15 @@ impl ZK {
                 let punch = rdr.read_u8()?;
 
                 let timestamp = ZK::decode_time(&time_bytes)?;
-                let user_id = String::from_utf8_lossy(&user_id_bytes)
-                    .trim_matches('\0')
-                    .to_string();
+                let user_id = if let Some(cached) = bytes_cache.get(&user_id_bytes) {
+                    cached.clone()
+                } else {
+                    let id = String::from_utf8_lossy(&user_id_bytes)
+                        .trim_matches('\0')
+                        .to_string();
+                    bytes_cache.insert(user_id_bytes, id.clone());
+                    id
+                };
 
                 attendances.push(Attendance::new(
                     uid as u32,
@@ -159,10 +183,13 @@ impl ZK {
         if res.command() == CMD_ACK_OK {
             Ok(())
         } else {
-            Err(ZKError::Response(format!(
-                "Failed to register events with flags {}",
-                flags
-            )))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                format!(
+                    "Failed to register events with flags {}",
+                    flags
+                ),
+            ))
         }
     }
 
@@ -171,7 +198,9 @@ impl ZK {
         let transport = self
             .transport
             .as_mut()
-            .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+            .ok_or_else(|| {
+                ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
+            })?;
         let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, &[]);
 
         match transport {
@@ -195,7 +224,10 @@ impl ZK {
     /// Decodes a 6-byte compressed time format used in real-time events.
     fn decode_timehex(hex: &[u8]) -> ZKResult<chrono::NaiveDateTime> {
         if hex.len() < 6 {
-            return Err(ZKError::InvalidData("Timehex too short".into()));
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::InvalidDataFormat,
+                "Timehex too short".into(),
+            ));
         }
         let year = hex[0] as i32 + 2000;
         let month = hex[1] as u32;
@@ -206,7 +238,12 @@ impl ZK {
 
         chrono::NaiveDate::from_ymd_opt(year, month, day)
             .and_then(|d| d.and_hms_opt(hour, minute, second))
-            .ok_or_else(|| ZKError::InvalidData("Invalid date/time in hex".into()))
+            .ok_or_else(|| {
+                ZKError::InvalidData(
+                    ZKErrorCode::InvalidDataFormat,
+                    "Invalid date/time in hex".into(),
+                )
+            })
     }
 
     /// Listens for real-time events and yields attendance records as they occur.
@@ -222,10 +259,13 @@ impl ZK {
                         let _ = self.send_ack_ok();
 
                         if packet.command() != CMD_REG_EVENT {
-                            return Some(Err(ZKError::Response(format!(
-                                "Unexpected command during event listening: {}",
-                                packet.command()
-                            ))));
+                            return Some(Err(ZKError::Response(
+                                ZKErrorCode::ProtocolViolation,
+                                format!(
+                                    "Unexpected command during event listening: {}",
+                                    packet.command()
+                                ),
+                            )));
                         }
 
                         let data = packet.payload();
@@ -270,10 +310,10 @@ impl ZK {
                                 };
                                 (0, user_id, status, punch, ts)
                             } else {
-                                return Some(Err(ZKError::InvalidData(format!(
-                                    "Unknown event data length: {}",
-                                    data.len()
-                                ))));
+                                return Some(Err(ZKError::InvalidData(
+                                    ZKErrorCode::InvalidDataFormat,
+                                    format!("Unknown event data length: {}", data.len()),
+                                )));
                             };
 
                         return Some(Ok(Attendance::new(

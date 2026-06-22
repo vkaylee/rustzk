@@ -21,16 +21,30 @@ use chrono::{Datelike, Timelike};
 
 pub use crate::transport::ZKTransport;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZKErrorCode {
+    Unauthorized,
+    Timeout,
+    ChecksumMismatch,
+    InvalidSession,
+    BufferOverflow,
+    ProtocolViolation,
+    ConnectionFailed,
+    DataConflict,
+    InvalidDataFormat,
+    Other,
+}
+
 #[derive(Error, Debug)]
 pub enum ZKError {
     #[error("Network error: {0}")]
     Network(#[from] io::Error),
-    #[error("Connection error: {0}")]
-    Connection(String),
-    #[error("Response error: {0}")]
-    Response(String),
-    #[error("Invalid data: {0}")]
-    InvalidData(String),
+    #[error("Connection error ({0:?}): {1}")]
+    Connection(ZKErrorCode, String),
+    #[error("Response error ({0:?}): {1}")]
+    Response(ZKErrorCode, String),
+    #[error("Invalid data ({0:?}): {1}")]
+    InvalidData(ZKErrorCode, String),
 }
 
 pub type ZKResult<T> = Result<T, ZKError>;
@@ -42,8 +56,8 @@ impl ZKError {
             ZKError::Network(err) => {
                 err.kind() == std::io::ErrorKind::TimedOut || err.kind() == std::io::ErrorKind::WouldBlock
             }
-            ZKError::Connection(msg) | ZKError::Response(msg) => {
-                msg.contains("timeout") || msg.contains("TimedOut")
+            ZKError::Connection(code, _) | ZKError::Response(code, _) => {
+                *code == ZKErrorCode::Timeout
             }
             _ => false,
         }
@@ -52,7 +66,7 @@ impl ZKError {
     /// Checks if the error is due to authorization failure.
     pub fn is_unauthorized(&self) -> bool {
         match self {
-            ZKError::Connection(msg) => msg.contains("Unauthorized") || msg.contains("password"),
+            ZKError::Connection(code, _) => *code == ZKErrorCode::Unauthorized,
             _ => false,
         }
     }
@@ -251,7 +265,10 @@ impl ZK {
 
     pub fn decode_time(t: &[u8]) -> ZKResult<chrono::NaiveDateTime> {
         if t.len() < 4 {
-            return Err(ZKError::InvalidData("Timestamp too short".into()));
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::InvalidDataFormat,
+                "Timestamp too short".into(),
+            ));
         }
         let mut rdr = io::Cursor::new(t);
         let t = rdr.read_u32::<byteorder::LittleEndian>()?;
@@ -270,7 +287,12 @@ impl ZK {
 
         chrono::NaiveDate::from_ymd_opt(year, month, day)
             .and_then(|d: chrono::NaiveDate| d.and_hms_opt(hour, minute, second))
-            .ok_or_else(|| ZKError::InvalidData("Invalid date/time".into()))
+            .ok_or_else(|| {
+                ZKError::InvalidData(
+                    ZKErrorCode::InvalidDataFormat,
+                    "Invalid date/time".into(),
+                )
+            })
     }
 
     pub fn encode_time(t: chrono::NaiveDateTime) -> u32 {
@@ -299,6 +321,7 @@ impl ZK {
         }
 
         Err(ZKError::Response(
+            ZKErrorCode::Other,
             "No free UID found in the specified range".into(),
         ))
     }

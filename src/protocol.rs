@@ -89,6 +89,16 @@ impl<'a> ZKPacket<'a> {
     pub fn into_payload(self) -> Cow<'a, [u8]> {
         self.payload
     }
+
+    /// Verifies if the packet's checksum matches the calculated one.
+    pub fn verify_checksum(&self, use_legacy: bool) -> bool {
+        let expected = if use_legacy {
+            self.calculate_checksum_legacy()
+        } else {
+            self.calculate_checksum()
+        };
+        self.checksum == expected
+    }
     /// Creates a new ZKPacket and automatically calculates the checksum
     /// using the **default** (Python pyzk-aligned) algorithm.
     ///
@@ -270,7 +280,10 @@ impl<'a> ZKPacket<'a> {
 
     pub fn from_bytes_owned(mut data: Vec<u8>) -> ZKResult<Self> {
         if data.len() < 8 {
-            return Err(ZKError::InvalidData("Packet too short".into()));
+            return Err(ZKError::InvalidData(
+                crate::ZKErrorCode::InvalidDataFormat,
+                "Packet too short".into(),
+            ));
         }
 
         let (command, checksum, session_id, reply_id) = {

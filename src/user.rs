@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian};
 
-use crate::{ZK, ZKError, ZKResult};
+use crate::{ZK, ZKError, ZKResult, ZKErrorCode};
 use crate::models::{User, Finger};
 use crate::constants::*;
 
@@ -21,10 +20,13 @@ impl ZK {
 
         let total_size = LittleEndian::read_u32(&userdata[0..4]) as usize;
         if total_size > MAX_RESPONSE_SIZE {
-            return Err(ZKError::InvalidData(format!(
-                "User data total_size {} exceeds maximum {}",
-                total_size, MAX_RESPONSE_SIZE
-            )));
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::BufferOverflow,
+                format!(
+                    "User data total_size {} exceeds maximum {}",
+                    total_size, MAX_RESPONSE_SIZE
+                ),
+            ));
         }
         if total_size == 0 {
             return Ok(Vec::new());
@@ -32,78 +34,31 @@ impl ZK {
         self.user_packet_size = total_size / self.users as usize;
         let data = &userdata[4..];
 
-        let mut users = Vec::with_capacity(self.users as usize);
+        let mut users = Vec::with_capacity(std::cmp::min(self.users as usize, data.len() / self.user_packet_size));
         let mut offset = 0;
 
         if self.user_packet_size == USER_PACKET_SIZE_SMALL {
             while offset + USER_PACKET_SIZE_SMALL <= data.len() {
                 let chunk = &data[offset..offset + USER_PACKET_SIZE_SMALL];
-                let mut rdr = io::Cursor::new(chunk);
-                let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
-                let privilege = rdr.read_u8()?;
-                let mut password_bytes = [0u8; 5];
-                rdr.read_exact(&mut password_bytes)?;
-                let mut name_bytes = [0u8; 8];
-                rdr.read_exact(&mut name_bytes)?;
-                let card = rdr.read_u32::<byteorder::LittleEndian>()?;
-                let _pad = rdr.read_u8()?;
-                let group_id = rdr.read_u8()?;
-                let _timezone = rdr.read_u16::<byteorder::LittleEndian>()?;
-                let user_id = rdr.read_u32::<byteorder::LittleEndian>()?;
-
-                users.push(User::new(
-                    uid,
-                    ZK::decode_gbk(&name_bytes),
-                    privilege,
-                    String::from_utf8_lossy(&password_bytes)
-                        .trim_matches('\0')
-                        .to_string(),
-                    group_id.to_string(),
-                    user_id.to_string(),
-                    card,
-                ));
+                let user = User::parse_small(chunk)?;
+                users.push(user);
                 offset += USER_PACKET_SIZE_SMALL;
             }
         } else if self.user_packet_size == USER_PACKET_SIZE_LARGE {
             while offset + USER_PACKET_SIZE_LARGE <= data.len() {
                 let chunk = &data[offset..offset + USER_PACKET_SIZE_LARGE];
-                let mut rdr = io::Cursor::new(chunk);
-                let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
-                let privilege = rdr.read_u8()?;
-                let mut password_bytes = [0u8; 8];
-                rdr.read_exact(&mut password_bytes)?;
-                let mut name_bytes = [0u8; 24];
-                rdr.read_exact(&mut name_bytes)?;
-                let card = rdr.read_u32::<byteorder::LittleEndian>()?;
-                let _pad1 = rdr.read_u8()?;
-                let mut group_id_bytes = [0u8; 7];
-                rdr.read_exact(&mut group_id_bytes)?;
-                let _pad2 = rdr.read_u8()?;
-                let mut user_id_bytes = [0u8; 24];
-                rdr.read_exact(&mut user_id_bytes)?;
-
-                users.push(User::new(
-                    uid,
-                    ZK::decode_gbk(&name_bytes),
-                    privilege,
-                    String::from_utf8_lossy(&password_bytes)
-                        .trim_matches('\0')
-                        .to_string(),
-                    String::from_utf8_lossy(&group_id_bytes)
-                        .trim_matches('\0')
-                        .to_string(),
-                    String::from_utf8_lossy(&user_id_bytes)
-                        .trim_matches('\0')
-                        .to_string(),
-                    card,
-                ));
+                let user = User::parse_large(chunk)?;
+                users.push(user);
                 offset += USER_PACKET_SIZE_LARGE;
             }
         } else {
-            return Err(ZKError::Response(format!(
-                "Unsupported user packet size: {}. Device might be using an unknown protocol version.",
-                self.user_packet_size
-            )));
+            return Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                format!(
+                    "Unsupported user packet size: {}. Device might be using an unknown protocol version.",
+                    self.user_packet_size
+                ),
+            ));
         }
 
         Ok(users)
@@ -122,10 +77,13 @@ impl ZK {
         // If it exists under the SAME UID, it's an update, which is allowed.
         if let Some(ref cache) = self.user_id_cache {
             if let Some((&existing_uid, _)) = cache.iter().find(|(&uid, id)| *id == user.user_id() && uid != user.uid()) {
-                return Err(ZKError::Response(format!(
-                    "Conflict: User ID '{}' already exists on the device at UID {}",
-                    user.user_id(), existing_uid
-                )));
+                return Err(ZKError::Response(
+                    ZKErrorCode::DataConflict,
+                    format!(
+                        "Conflict: User ID '{}' already exists on the device at UID {}",
+                        user.user_id(), existing_uid
+                    ),
+                ));
             }
         }
 
@@ -149,10 +107,13 @@ impl ZK {
         if let Some(ref mut cache) = self.user_id_cache {
             for user in users {
                 if let Some((&existing_uid, _)) = cache.iter().find(|(&uid, id)| *id == user.user_id() && uid != user.uid()) {
-                    return Err(ZKError::Response(format!(
-                        "Conflict in batch: User ID '{}' already exists on device at UID {}",
-                        user.user_id(), existing_uid
-                    )));
+                    return Err(ZKError::Response(
+                        ZKErrorCode::DataConflict,
+                        format!(
+                            "Conflict in batch: User ID '{}' already exists on device at UID {}",
+                            user.user_id(), existing_uid
+                        ),
+                    ));
                 }
 
                 // Update the local cache to reflect the state for subsequent users in the batch
@@ -181,65 +142,11 @@ impl ZK {
 
     /// Internal helper to set a user without sending a REFRESHDATA command.
     fn set_user_unchecked_no_refresh(&mut self, user: &User) -> ZKResult<()> {
-        let mut payload = Vec::new();
-
-        if self.user_packet_size == 28 {
-            payload.write_u16::<LittleEndian>(user.uid())?;
-            payload.write_u8(user.privilege())?;
-
-            let mut password_bytes = [0u8; 5];
-            let p_bytes = user.password().as_bytes();
-            let p_len = std::cmp::min(p_bytes.len(), 5);
-            password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
-            payload.write_all(&password_bytes)?;
-
-            let mut name_bytes = [0u8; 8];
-            let n_bytes_gbk = encoding_rs::GBK.encode(user.name()).0;
-            let n_len = std::cmp::min(n_bytes_gbk.len(), 8);
-            name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
-            payload.write_all(&name_bytes)?;
-
-            payload.write_u32::<LittleEndian>(user.card())?;
-            payload.write_u8(0)?; // pad
-            let group_id = user.group_id().parse::<u8>().unwrap_or(0);
-            payload.write_u8(group_id)?;
-            payload.write_u16::<LittleEndian>(0)?; // timezone/pad
-            let user_id_num = user.user_id().parse::<u32>().unwrap_or(0);
-            payload.write_u32::<LittleEndian>(user_id_num)?;
+        let payload = if self.user_packet_size == USER_PACKET_SIZE_SMALL {
+            user.to_bytes_small()?
         } else {
-            // 72-byte format
-            payload.write_u16::<LittleEndian>(user.uid())?;
-            payload.write_u8(user.privilege())?;
-
-            let mut password_bytes = [0u8; 8];
-            let p_bytes = user.password().as_bytes();
-            let p_len = std::cmp::min(p_bytes.len(), 8);
-            password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
-            payload.write_all(&password_bytes)?;
-
-            let mut name_bytes = [0u8; 24];
-            let n_bytes_gbk = encoding_rs::GBK.encode(user.name()).0;
-            let n_len = std::cmp::min(n_bytes_gbk.len(), 24);
-            name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
-            payload.write_all(&name_bytes)?;
-
-            payload.write_u32::<LittleEndian>(user.card())?;
-            payload.write_u8(0)?; // pad1
-
-            let mut group_id_bytes = [0u8; 7];
-            let g_bytes = user.group_id().as_bytes();
-            let g_len = std::cmp::min(g_bytes.len(), 7);
-            group_id_bytes[..g_len].copy_from_slice(&g_bytes[..g_len]);
-            payload.write_all(&group_id_bytes)?;
-
-            payload.write_u8(0)?; // pad2
-
-            let mut user_id_bytes = [0u8; 24];
-            let u_bytes = user.user_id().as_bytes();
-            let u_len = std::cmp::min(u_bytes.len(), 24);
-            user_id_bytes[..u_len].copy_from_slice(&u_bytes[..u_len]);
-            payload.write_all(&user_id_bytes)?;
-        }
+            user.to_bytes_large()?
+        };
 
         let res = self.send_command(CMD_USER_WRQ, &payload)?;
         if res.command() == CMD_ACK_OK {
@@ -250,7 +157,10 @@ impl ZK {
             }
             Ok(())
         } else {
-            Err(ZKError::Response("Failed to set user".into()))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Failed to set user".into(),
+            ))
         }
     }
 
@@ -268,7 +178,10 @@ impl ZK {
             let _ = self.refresh_data();
             Ok(())
         } else {
-            Err(ZKError::Response("Failed to delete user".into()))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Failed to delete user".into(),
+            ))
         }
     }
 
@@ -286,20 +199,23 @@ impl ZK {
 
         let raw_total = LittleEndian::read_i32(&templatedata[0..4]);
         if raw_total < 0 {
-            return Err(ZKError::InvalidData(format!(
-                "Negative template data size: {}",
-                raw_total
-            )));
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::InvalidDataFormat,
+                format!("Negative template data size: {}", raw_total),
+            ));
         }
         let mut total_size = raw_total as usize;
         if total_size > MAX_RESPONSE_SIZE {
-            return Err(ZKError::InvalidData(format!(
-                "Template data size {} exceeds maximum {}",
-                total_size, MAX_RESPONSE_SIZE
-            )));
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::BufferOverflow,
+                format!(
+                    "Template data size {} exceeds maximum {}",
+                    total_size, MAX_RESPONSE_SIZE
+                ),
+            ));
         }
         let mut data = &templatedata[4..];
-        let mut templates = Vec::with_capacity(self.fingers as usize);
+        let mut templates = Vec::with_capacity(std::cmp::min(self.fingers as usize, data.len() / 6));
 
         while total_size > 0 && data.len() >= 6 {
             let size = LittleEndian::read_u16(&data[0..2]) as usize;
@@ -367,7 +283,10 @@ impl ZK {
             let _ = self.refresh_data();
             Ok(())
         } else {
-            Err(ZKError::Response("Failed to delete user template".into()))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Failed to delete user template".into(),
+            ))
         }
     }
 

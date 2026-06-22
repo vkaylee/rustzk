@@ -180,7 +180,7 @@ fn test_auto_fallback_to_legacy_checksum() {
         assert_eq!(packet2.checksum() - packet1.checksum(), 1);
 
         // Accept — send CMD_ACK_OK response
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet2.reply_id(), vec![]);
+        let res = ZKPacket::new_with_legacy(CMD_ACK_OK, session_id, packet2.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -237,7 +237,7 @@ fn test_set_legacy_checksum_skips_autodetect() {
             "With set_legacy_checksum(true), first packet should use legacy"
         );
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+        let res = ZKPacket::new_with_legacy(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -296,7 +296,7 @@ fn test_subsequent_commands_use_detected_checksum() {
             ZKPacket::new_with_legacy(CMD_CONNECT, packet.session_id(), packet.reply_id(), vec![]);
         assert_eq!(packet.checksum(), expected.checksum(), "Should be legacy");
 
-        let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
+        let res = ZKPacket::new_with_legacy(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
         stream
             .write_all(&TCPWrapper::wrap(&res.to_bytes()))
             .unwrap();
@@ -323,7 +323,7 @@ fn test_subsequent_commands_use_detected_checksum() {
         );
 
         // Respond with firmware version
-        let res = ZKPacket::new(
+        let res = ZKPacket::new_with_legacy(
             CMD_ACK_OK,
             session_id,
             packet.reply_id(),
@@ -344,3 +344,49 @@ fn test_subsequent_commands_use_detected_checksum() {
 
     server.join().unwrap();
 }
+
+/// Verify that client rejects packets with invalid checksums.
+#[test]
+fn test_incoming_checksum_mismatch_rejected() {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        
+        // Read CMD_CONNECT
+        let mut header = [0u8; 8];
+        stream.read_exact(&mut header).unwrap();
+        let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+        let mut body = vec![0u8; length];
+        stream.read_exact(&mut body).unwrap();
+        let packet = ZKPacket::from_bytes_owned(body).unwrap();
+        assert_eq!(packet.command(), CMD_CONNECT);
+
+        // Prepare CMD_ACK_OK response, but corrupt the checksum bytes (offset 2-3 in packet body)
+        let res = ZKPacket::new(CMD_ACK_OK, 9999, packet.reply_id(), vec![]);
+        let mut res_bytes = res.to_bytes();
+        res_bytes[2] ^= 0xFF; // Corrupt checksum
+        res_bytes[3] ^= 0xFF; // Corrupt checksum
+
+        stream
+            .write_all(&TCPWrapper::wrap(&res_bytes))
+            .unwrap();
+        stream.flush().unwrap();
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    let result = zk.connect(ZKProtocol::TCP);
+
+    assert!(result.is_err(), "Client should reject packet with invalid checksum");
+    match result.unwrap_err() {
+        rustzk::ZKError::InvalidData(rustzk::ZKErrorCode::ChecksumMismatch, msg) => {
+            assert!(msg.contains("Invalid packet checksum"));
+        }
+        other => panic!("Expected ZKError::InvalidData with ZKErrorCode::ChecksumMismatch, got: {:?}", other),
+    }
+
+    server.join().unwrap();
+}
+

@@ -3,7 +3,7 @@ use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
-use crate::{ZK, ZKError, ZKResult, ZKProtocol};
+use crate::{ZK, ZKError, ZKResult, ZKProtocol, ZKErrorCode};
 use crate::protocol::{TCPWrapper, ZKPacket};
 use crate::constants::*;
 
@@ -110,7 +110,10 @@ impl ZK {
             let auth_res = self.send_command(CMD_AUTH, &command_string)?;
             if auth_res.command() == CMD_ACK_UNAUTH {
                 self.session_id = 0; // Reset dirty session_id on auth failure
-                return Err(ZKError::Connection("Unauthorized: Password required or incorrect".into()));
+                return Err(ZKError::Connection(
+                    ZKErrorCode::Unauthorized,
+                    "Unauthorized: Password required or incorrect".into(),
+                ));
             }
             self.session_id = auth_res.session_id();
             self.is_connected = true;
@@ -121,10 +124,13 @@ impl ZK {
             self.is_connected = true;
             Ok(())
         } else {
-            Err(ZKError::Connection(format!(
-                "Invalid response during connect handshake: {}",
-                res.command()
-            )))
+            Err(ZKError::Connection(
+                ZKErrorCode::ProtocolViolation,
+                format!(
+                    "Invalid response during connect handshake: {}",
+                    res.command()
+                ),
+            ))
         }
     }
 
@@ -148,7 +154,9 @@ impl ZK {
         let transport = self
             .transport
             .as_mut()
-            .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+            .ok_or_else(|| {
+                ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
+            })?;
 
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
@@ -156,14 +164,21 @@ impl ZK {
                     let mut header = [0u8; 8];
                     reader.read_exact(&mut header)?;
                     let (length, _) = TCPWrapper::decode_header(&header)
-                        .map_err(|e| ZKError::InvalidData(e.to_string()))?;
+                        .map_err(|e| ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, e.to_string()))?;
 
                     crate::security::validate_packet_size(length)?;
 
                     let mut body = vec![0u8; length];
                     reader.read_exact(&mut body)?;
 
-                    ZKPacket::from_bytes_owned(body)
+                    let packet = ZKPacket::from_bytes_owned(body)?;
+                    if !packet.verify_checksum(self.use_legacy_checksum) {
+                        return Err(ZKError::InvalidData(
+                            ZKErrorCode::ChecksumMismatch,
+                            "Invalid packet checksum".into(),
+                        ));
+                    }
+                    Ok(packet)
                 };
 
                 let res = read_tcp_frame();
@@ -189,7 +204,14 @@ impl ZK {
 
                 crate::security::validate_packet_size(packet_data.len())?;
 
-                ZKPacket::from_bytes_owned(packet_data)
+                let packet = ZKPacket::from_bytes_owned(packet_data)?;
+                if !packet.verify_checksum(self.use_legacy_checksum) {
+                    return Err(ZKError::InvalidData(
+                        ZKErrorCode::ChecksumMismatch,
+                        "Invalid packet checksum".into(),
+                    ));
+                }
+                Ok(packet)
             }
         }
     }
@@ -213,7 +235,10 @@ impl ZK {
                     res_packet.reply_id()
                 );
                 if discarded > MAX_DISCARDED_PACKETS {
-                    return Err(ZKError::Response("Too many discarded packets".into()));
+                    return Err(ZKError::Response(
+                        ZKErrorCode::ProtocolViolation,
+                        "Too many discarded packets".into(),
+                    ));
                 }
                 continue;
             }
@@ -227,7 +252,10 @@ impl ZK {
         payload: &[u8],
     ) -> ZKResult<ZKPacket<'static>> {
         if self.transport.is_none() {
-            return Err(ZKError::Connection("Not connected".into()));
+            return Err(ZKError::Connection(
+                ZKErrorCode::ConnectionFailed,
+                "Not connected".into(),
+            ));
         }
 
         self.reply_id = self.reply_id.wrapping_add(1);
@@ -251,7 +279,9 @@ impl ZK {
         let transport = self
             .transport
             .as_mut()
-            .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
+            .ok_or_else(|| {
+                ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
+            })?;
 
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
@@ -283,15 +313,21 @@ impl ZK {
             Ok(())
         } else if res.command() == CMD_PREPARE_DATA {
             if res.payload().len() < 4 {
-                return Err(ZKError::InvalidData("Invalid prepare data payload".into()));
+                return Err(ZKError::InvalidData(
+                    ZKErrorCode::InvalidDataFormat,
+                    "Invalid prepare data payload".into(),
+                ));
             }
             let size = byteorder::LittleEndian::read_u32(&res.payload()[..4]) as usize;
 
             if size > MAX_RESPONSE_SIZE {
-                return Err(ZKError::InvalidData(format!(
-                    "Response size {} exceeds maximum {}",
-                    size, MAX_RESPONSE_SIZE
-                )));
+                return Err(ZKError::InvalidData(
+                    ZKErrorCode::BufferOverflow,
+                    format!(
+                        "Response size {} exceeds maximum {}",
+                        size, MAX_RESPONSE_SIZE
+                    ),
+                ));
             }
 
             data.reserve(size);
@@ -310,18 +346,21 @@ impl ZK {
                 } else if chunk_res.command() == CMD_ACK_OK {
                     break;
                 } else {
-                    return Err(ZKError::Response(format!(
-                        "Unexpected chunk command: 0x{:X}",
-                        chunk_res.command()
-                    )));
+                    return Err(ZKError::Response(
+                        ZKErrorCode::ProtocolViolation,
+                        format!(
+                            "Unexpected chunk command: 0x{:X}",
+                            chunk_res.command()
+                        ),
+                    ));
                 }
             }
             Ok(())
         } else {
-            Err(ZKError::Response(format!(
-                "Invalid response for chunk: 0x{:X}",
-                res.command()
-            )))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                format!("Invalid response for chunk: 0x{:X}", res.command()),
+            ))
         }
     }
 
@@ -369,8 +408,12 @@ impl ZK {
                 std::thread::sleep(std::time::Duration::from_millis(attempt as u64 * 100));
             }
         }
-
-        Err(last_error.unwrap_or_else(|| ZKError::Response("Chunk read failed".into())))
+        Err(last_error.unwrap_or_else(|| {
+            ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Chunk read failed".into(),
+            )
+        }))
     }
 
     pub(crate) fn read_with_buffer(&mut self, command: u16, fct: u32, size: u32) -> ZKResult<Vec<u8>> {
@@ -390,10 +433,13 @@ impl ZK {
         } else if res.payload().len() >= 4 {
             byteorder::LittleEndian::read_u32(&res.payload()[0..4]) as usize
         } else {
-            return Err(ZKError::Response(format!(
-                "Invalid response size length: {}",
-                res.payload().len()
-            )));
+            return Err(ZKError::Response(
+                ZKErrorCode::InvalidDataFormat,
+                format!(
+                    "Invalid response size length: {}",
+                    res.payload().len()
+                ),
+            ));
         };
 
         if res.payload().len() >= 5 && size > MAX_RESPONSE_SIZE {
@@ -404,10 +450,13 @@ impl ZK {
         }
 
         if size > MAX_RESPONSE_SIZE {
-            return Err(ZKError::InvalidData(format!(
-                "Buffered response size {} exceeds maximum {}",
-                size, MAX_RESPONSE_SIZE
-            )));
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::BufferOverflow,
+                format!(
+                    "Buffered response size {} exceeds maximum {}",
+                    size, MAX_RESPONSE_SIZE
+                ),
+            ));
         }
 
         if size == 0 {
@@ -436,6 +485,7 @@ impl ZK {
                 empty_responses_count += 1;
                 if empty_responses_count > 20 {
                     return Err(ZKError::Response(
+                        ZKErrorCode::Timeout,
                         "Too many empty responses from device during buffer read".into(),
                     ));
                 }
@@ -460,6 +510,7 @@ impl ZK {
     pub fn connect(&mut self, protocol: ZKProtocol) -> ZKResult<()> {
         if self.is_connected {
             return Err(ZKError::Connection(
+                ZKErrorCode::ConnectionFailed,
                 "Already connected. Call disconnect() first.".into(),
             ));
         }
@@ -482,12 +533,18 @@ impl ZK {
 
     fn connect_tcp(&mut self) -> ZKResult<()> {
         let addrs = self.addr.to_socket_addrs().map_err(|e| {
-            ZKError::Connection(format!("Failed to resolve address {}: {}", self.addr, e))
+            ZKError::Connection(
+                ZKErrorCode::ConnectionFailed,
+                format!("Failed to resolve address {}: {}", self.addr, e),
+            )
         })?;
         let addr = addrs
             .into_iter()
             .next()
-            .ok_or_else(|| ZKError::Connection(format!("No address found for {}", self.addr)))?;
+            .ok_or_else(|| ZKError::Connection(
+                ZKErrorCode::ConnectionFailed,
+                format!("No address found for {}", self.addr)
+            ))?;
 
         let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
         stream.set_nodelay(true)?;

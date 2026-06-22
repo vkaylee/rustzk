@@ -484,12 +484,12 @@ fn stress_handshake_timeout_recovery() {
             let packet2 = ZKPacket::from_bytes_owned(body2).unwrap();
             assert_eq!(packet2.command(), CMD_CONNECT);
 
-            let res = ZKPacket::new(CMD_ACK_OK, 8888, packet2.reply_id(), vec![]);
+            let res = ZKPacket::new_with_legacy(CMD_ACK_OK, 8888, packet2.reply_id(), vec![]);
             send_response(&mut stream, &res);
 
             // Handle CMD_EXIT
             while let Some(pkt) = read_request(&mut stream) {
-                let res = ZKPacket::new(CMD_ACK_OK, 8888, pkt.reply_id(), vec![]);
+                let res = ZKPacket::new_with_legacy(CMD_ACK_OK, 8888, pkt.reply_id(), vec![]);
                 send_response(&mut stream, &res);
                 if pkt.command() == CMD_EXIT {
                     break;

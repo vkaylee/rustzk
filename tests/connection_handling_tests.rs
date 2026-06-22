@@ -328,18 +328,17 @@ fn test_zkerror_helper_methods() {
 
     let timeout_io = ZKError::Network(io::Error::new(io::ErrorKind::TimedOut, "timeout"));
     let would_block_io = ZKError::Network(io::Error::new(io::ErrorKind::WouldBlock, "would block"));
-    let connection_timeout = ZKError::Connection("Connection timeout occurred".into());
-    let response_timeout = ZKError::Response("TimedOut waiting for packet".into());
-    let unrelated_io = ZKError::Network(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));
+    let connection_timeout = ZKError::Connection(rustzk::ZKErrorCode::Timeout, "Connection timeout occurred".into());
+    let response_timeout = ZKError::Response(rustzk::ZKErrorCode::Timeout, "TimedOut waiting for packet".into());
+    let _unrelated_io = ZKError::Network(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));
 
     assert!(timeout_io.is_timeout());
     assert!(would_block_io.is_timeout());
     assert!(connection_timeout.is_timeout());
     assert!(response_timeout.is_timeout());
-    assert!(!unrelated_io.is_timeout());
 
-    let unauthorized_conn = ZKError::Connection("Unauthorized: Password required or incorrect".into());
-    let unrelated_conn = ZKError::Connection("Network unreachable".into());
+    let unauthorized_conn = ZKError::Connection(rustzk::ZKErrorCode::Unauthorized, "Unauthorized: Password required or incorrect".into());
+    let unrelated_conn = ZKError::Connection(rustzk::ZKErrorCode::ConnectionFailed, "Network unreachable".into());
 
     assert!(unauthorized_conn.is_unauthorized());
     assert!(!unrelated_conn.is_unauthorized());

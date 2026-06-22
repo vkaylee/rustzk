@@ -1,7 +1,7 @@
 use chrono::{DateTime, FixedOffset, TimeZone};
 use byteorder::{ByteOrder, LittleEndian};
 
-use crate::{ZK, ZKError, ZKResult};
+use crate::{ZK, ZKError, ZKResult, ZKErrorCode};
 use crate::constants::*;
 
 impl ZK {
@@ -52,10 +52,13 @@ impl ZK {
             let _ = self.sync_timezone();
             Ok(())
         } else {
-            Err(ZKError::Response(format!(
-                "Failed to read sizes (Device returned CMD 0x{:X})",
-                res.command()
-            )))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                format!(
+                    "Failed to read sizes (Device returned CMD 0x{:X})",
+                    res.command()
+                ),
+            ))
         }
     }
 
@@ -66,7 +69,10 @@ impl ZK {
                 .trim_matches('\0')
                 .to_string())
         } else {
-            Err(ZKError::Response("Can't read firmware version".into()))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Can't read firmware version".into(),
+            ))
         }
     }
 
@@ -85,10 +91,13 @@ impl ZK {
                 Ok(data_str)
             }
         } else {
-            Err(ZKError::Response(format!(
-                "Can't read option '{}' (Device returned CMD 0x{:X})",
-                key, res.command()
-            )))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                format!(
+                    "Can't read option '{}' (Device returned CMD 0x{:X})",
+                    key, res.command()
+                ),
+            ))
         }
     }
 
@@ -105,7 +114,12 @@ impl ZK {
         let tz_str = self.get_option_value("TZAdj")?;
         tz_str
             .parse::<i32>()
-            .map_err(|_| ZKError::InvalidData(format!("Invalid timezone value: {}", tz_str)))
+            .map_err(|_| {
+                ZKError::InvalidData(
+                    ZKErrorCode::InvalidDataFormat,
+                    format!("Invalid timezone value: {}", tz_str),
+                )
+            })
     }
 
     pub fn get_mac(&mut self) -> ZKResult<String> {
@@ -135,16 +149,26 @@ impl ZK {
         if res.command() == CMD_ACK_OK || res.command() == CMD_ACK_DATA {
             let naive = ZK::decode_time(res.payload())?;
             let offset = FixedOffset::east_opt(self.timezone_offset * 60).unwrap_or_else(|| {
-                #[allow(clippy::unwrap_used)]
-                FixedOffset::east_opt(0).unwrap()
+                match FixedOffset::east_opt(0) {
+                    Some(o) => o,
+                    None => unreachable!(),
+                }
             });
 
             offset
                 .from_local_datetime(&naive)
                 .single()
-                .ok_or_else(|| ZKError::InvalidData("Ambiguous time from device".into()))
+                .ok_or_else(|| {
+                    ZKError::InvalidData(
+                        ZKErrorCode::InvalidDataFormat,
+                        "Ambiguous time from device".into(),
+                    )
+                })
         } else {
-            Err(ZKError::Response("Can't get time".into()))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Can't get time".into(),
+            ))
         }
     }
 
@@ -159,7 +183,10 @@ impl ZK {
         if res.command() == CMD_ACK_OK {
             Ok(())
         } else {
-            Err(ZKError::Response("Failed to set time".into()))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Failed to set time".into(),
+            ))
         }
     }
 
@@ -170,7 +197,10 @@ impl ZK {
         if res.command() == CMD_ACK_OK {
             Ok(())
         } else {
-            Err(ZKError::Response(format!("Failed to set option {}", key)))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                format!("Failed to set option {}", key),
+            ))
         }
     }
 
@@ -203,7 +233,10 @@ impl ZK {
         if res.command() == CMD_ACK_OK {
             Ok(())
         } else {
-            Err(ZKError::Response("Can't open door".into()))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Can't open door".into(),
+            ))
         }
     }
 
@@ -213,7 +246,10 @@ impl ZK {
         if res.command() == CMD_ACK_OK {
             Ok(())
         } else {
-            Err(ZKError::Response("Failed to refresh data".into()))
+            Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Failed to refresh data".into(),
+            ))
         }
     }
 
