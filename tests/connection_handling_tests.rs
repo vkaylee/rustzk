@@ -1,6 +1,6 @@
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
-use rustzk::{ZKProtocol, ZK};
+use rustzk::{ZKProtocol, ZK, ZKError};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
@@ -319,4 +319,141 @@ fn test_auto_fallback_preserves_checksum_flag() {
         zk.use_legacy_checksum(),
         "use_legacy_checksum should be preserved after Auto fallback, not flipped by failed TCP handshake"
     );
+}
+
+/// Test: ZKError helper methods classify errors correctly.
+#[test]
+fn test_zkerror_helper_methods() {
+    use std::io;
+
+    let timeout_io = ZKError::Network(io::Error::new(io::ErrorKind::TimedOut, "timeout"));
+    let would_block_io = ZKError::Network(io::Error::new(io::ErrorKind::WouldBlock, "would block"));
+    let connection_timeout = ZKError::Connection("Connection timeout occurred".into());
+    let response_timeout = ZKError::Response("TimedOut waiting for packet".into());
+    let unrelated_io = ZKError::Network(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));
+
+    assert!(timeout_io.is_timeout());
+    assert!(would_block_io.is_timeout());
+    assert!(connection_timeout.is_timeout());
+    assert!(response_timeout.is_timeout());
+    assert!(!unrelated_io.is_timeout());
+
+    let unauthorized_conn = ZKError::Connection("Unauthorized: Password required or incorrect".into());
+    let unrelated_conn = ZKError::Connection("Network unreachable".into());
+
+    assert!(unauthorized_conn.is_unauthorized());
+    assert!(!unrelated_conn.is_unauthorized());
+}
+
+/// Test: is_alive() doesn't hang when connection is dead.
+#[test]
+fn test_zk_is_alive_timeout_handling() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("Failed to accept");
+        
+        // Handle connect
+        let mut header = [0u8; 8];
+        if stream.read_exact(&mut header).is_ok() {
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            let _ = stream.read_exact(&mut body);
+            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
+            let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
+        }
+        
+        // For subsequent requests (like CMD_GET_TIME in is_alive), we just do nothing
+        // to simulate a silent/hung connection
+        thread::sleep(Duration::from_secs(5));
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+    assert!(zk.is_connected());
+
+    // is_alive should fail quickly (timeout set to 2s in implementation),
+    // and reset the connection state
+    let start = std::time::Instant::now();
+    let alive = zk.is_alive();
+    let elapsed = start.elapsed();
+
+    assert!(!alive);
+    assert!(!zk.is_connected());
+    assert!(elapsed < Duration::from_secs(4), "is_alive should time out in ~2s, took {:?}", elapsed);
+}
+
+/// Test: TCP stream recovery immediately closes transport on framing error.
+#[test]
+fn test_tcp_framing_deserialization_recovery() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("Failed to accept");
+        
+        // Handle connect
+        let mut header = [0u8; 8];
+        if stream.read_exact(&mut header).is_ok() {
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            let _ = stream.read_exact(&mut body);
+            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
+            let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
+        }
+
+        // Send corrupt header magic bytes back for the next command
+        // Wrong magic: [0x00, 0x00, 0x00, 0x00]
+        let corrupt_header = [0u8; 8];
+        let _ = stream.write_all(&corrupt_header);
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+    assert!(zk.is_connected());
+
+    // Send option query, which will read the corrupt header
+    let res = zk.get_option_value("TZAdj");
+    assert!(res.is_err());
+    assert!(!zk.is_connected(), "Connection should be marked offline");
+}
+
+/// Test: Drop is completely non-blocking.
+#[test]
+fn test_zk_drop_non_blocking() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+    let addr = listener.local_addr().unwrap();
+    let port = addr.port();
+
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("Failed to accept");
+        // Handle connect
+        let mut header = [0u8; 8];
+        if stream.read_exact(&mut header).is_ok() {
+            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+            let mut body = vec![0u8; length];
+            let _ = stream.read_exact(&mut body);
+            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
+            let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
+        }
+        // Sleep to simulate unreachable connection during drop
+        thread::sleep(Duration::from_secs(5));
+    });
+
+    let mut zk = ZK::new("127.0.0.1", port);
+    zk.connect(ZKProtocol::TCP).unwrap();
+
+    let start = std::time::Instant::now();
+    // Drop the ZK instance. It should be non-blocking (microsecond scale),
+    // and not block for 3 seconds or 5 seconds.
+    std::mem::drop(zk);
+    let elapsed = start.elapsed();
+
+    assert!(elapsed < Duration::from_millis(50), "Drop took {:?}, should be near-instant (non-blocking)", elapsed);
 }

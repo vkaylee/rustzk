@@ -22,6 +22,8 @@ fn test_zk_drop_auto_disconnects() {
         loop {
             let mut header = [0u8; 8];
             if stream.read_exact(&mut header).is_err() {
+                // Stream closed/EOF - signal that stream was dropped
+                let _ = tx.send(true);
                 break;
             }
 
@@ -39,8 +41,6 @@ fn test_zk_drop_auto_disconnects() {
                         .unwrap();
                 }
                 CMD_EXIT => {
-                    // Signal that we received CMD_EXIT
-                    tx.send(true).unwrap();
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
                     break;
@@ -55,14 +55,14 @@ fn test_zk_drop_auto_disconnects() {
         zk.connect(ZKProtocol::TCP).expect("Failed to connect");
         assert!(zk.is_connected());
         // zk will be dropped at the end of this block.
-        // Drop should auto-disconnect by sending CMD_EXIT.
+        // Drop should auto-disconnect by closing the socket.
     }
 
-    // Verify that CMD_EXIT WAS sent by Drop (auto-disconnect)
+    // Verify that the socket was closed by Drop
     let result = rx.recv_timeout(Duration::from_secs(3));
     assert!(
         result.is_ok(),
-        "Drop should auto-disconnect by sending CMD_EXIT"
+        "Drop should auto-disconnect by closing the connection"
     );
 }
 

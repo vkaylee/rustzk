@@ -540,9 +540,9 @@ fn stress_handshake_timeout_recovery() {
 // ============================================================================
 
 /// Stress test: 20 connect/disconnect cycles, counting CMD_EXIT on server side.
-/// Also tests that Drop sends CMD_EXIT when disconnect() is NOT called.
-/// This is CRITICAL for real devices — if CMD_EXIT is not sent, the device
-/// runs out of sessions and needs to be rebooted.
+/// For the first half, we call explicit disconnect() which sends CMD_EXIT.
+/// For the second half, we let Drop auto-disconnect, which closes the socket
+/// without sending CMD_EXIT (non-blocking design).
 #[test]
 fn stress_cmd_exit_always_sent() {
     let cycles = 20;
@@ -555,7 +555,7 @@ fn stress_cmd_exit_always_sent() {
     // - Second half: Drop auto-disconnect
     let handle = spawn_reusable_mock_server(listener, cycles, exit_counter.clone());
 
-    // First half: explicit disconnect
+    // First half: explicit disconnect (sends CMD_EXIT)
     let half = cycles / 2;
     for i in 0..half {
         let mut zk = ZK::new("127.0.0.1", port);
@@ -566,21 +566,21 @@ fn stress_cmd_exit_always_sent() {
             .unwrap_or_else(|e| panic!("Cycle {}: disconnect failed: {}", i, e));
     }
 
-    // Second half: let Drop auto-disconnect
+    // Second half: let Drop auto-disconnect (closes socket without CMD_EXIT)
     for i in half..cycles {
         let mut zk = ZK::new("127.0.0.1", port);
         zk.set_timeout(Duration::from_secs(5));
         zk.connect(ZKProtocol::TCP)
             .unwrap_or_else(|e| panic!("Cycle {}: connect failed: {}", i, e));
-        // No explicit disconnect — Drop should handle it
+        // No explicit disconnect — Drop should handle it by closing the connection
     }
 
     handle.join().unwrap();
 
     let total_exits = exit_counter.load(Ordering::SeqCst);
     assert_eq!(
-        total_exits, cycles,
-        "Expected {} CMD_EXIT messages (explicit + Drop), got {}",
-        cycles, total_exits
+        total_exits, half,
+        "Expected {} CMD_EXIT messages (only from explicit disconnect), got {}",
+        half, total_exits
     );
 }

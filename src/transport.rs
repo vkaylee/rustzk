@@ -152,17 +152,35 @@ impl ZK {
 
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
-                let mut header = [0u8; 8];
-                reader.read_exact(&mut header)?;
-                let (length, _) = TCPWrapper::decode_header(&header)
-                    .map_err(|e| ZKError::InvalidData(e.to_string()))?;
+                let mut read_tcp_frame = || -> ZKResult<ZKPacket<'static>> {
+                    let mut header = [0u8; 8];
+                    reader.read_exact(&mut header)?;
+                    let (length, _) = TCPWrapper::decode_header(&header)
+                        .map_err(|e| ZKError::InvalidData(e.to_string()))?;
 
-                crate::security::validate_packet_size(length)?;
+                    crate::security::validate_packet_size(length)?;
 
-                let mut body = vec![0u8; length];
-                reader.read_exact(&mut body)?;
+                    let mut body = vec![0u8; length];
+                    reader.read_exact(&mut body)?;
 
-                ZKPacket::from_bytes_owned(body)
+                    ZKPacket::from_bytes_owned(body)
+                };
+
+                let res = read_tcp_frame();
+                if let Err(ref e) = res {
+                    let is_timeout = match e {
+                        ZKError::Network(io_err) => {
+                            io_err.kind() == std::io::ErrorKind::TimedOut || io_err.kind() == std::io::ErrorKind::WouldBlock
+                        }
+                        _ => false,
+                    };
+                    if !is_timeout {
+                        log::warn!("TCP stream desynchronized or hard failed. Closing transport: {:?}", e);
+                        self.is_connected = false;
+                        self.transport = None;
+                    }
+                }
+                res
             }
             ZKTransport::Udp(ref mut socket) => {
                 self.udp_buf.resize(2048, 0);

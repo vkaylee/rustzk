@@ -35,6 +35,29 @@ pub enum ZKError {
 
 pub type ZKResult<T> = Result<T, ZKError>;
 
+impl ZKError {
+    /// Checks if the error is due to a network connection timeout.
+    pub fn is_timeout(&self) -> bool {
+        match self {
+            ZKError::Network(err) => {
+                err.kind() == std::io::ErrorKind::TimedOut || err.kind() == std::io::ErrorKind::WouldBlock
+            }
+            ZKError::Connection(msg) | ZKError::Response(msg) => {
+                msg.contains("timeout") || msg.contains("TimedOut")
+            }
+            _ => false,
+        }
+    }
+
+    /// Checks if the error is due to authorization failure.
+    pub fn is_unauthorized(&self) -> bool {
+        match self {
+            ZKError::Connection(msg) => msg.contains("Unauthorized") || msg.contains("password"),
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ZKProtocol {
     TCP,
@@ -185,10 +208,16 @@ impl ZK {
         if !self.is_connected {
             return false;
         }
-        match self.send_command(CMD_GET_TIME, &[]) {
+        let saved_timeout = self.timeout;
+        self.set_transport_read_timeout(Duration::from_secs(2));
+        let res = self.send_command(CMD_GET_TIME, &[]);
+        self.set_transport_read_timeout(saved_timeout);
+
+        match res {
             Ok(packet) => packet.command() == CMD_ACK_OK || packet.command() == CMD_ACK_DATA,
             Err(_) => {
                 self.is_connected = false;
+                self.transport = None;
                 false
             }
         }
@@ -277,11 +306,10 @@ impl ZK {
 
 impl Drop for ZK {
     fn drop(&mut self) {
-        // Auto-disconnect: safe because disconnect() uses a 3s timeout,
-        // so it won't hang even if the device is unreachable.
-        if self.is_connected {
-            let _ = self.disconnect();
-        }
+        // Only reset local connection state and let transport drop naturally.
+        // Doing network I/O in Drop is a blocking hang hazard.
+        self.is_connected = false;
+        self.transport = None;
     }
 }
 

@@ -172,7 +172,7 @@ impl ZK {
             .transport
             .as_mut()
             .ok_or_else(|| ZKError::Connection("Not connected".into()))?;
-        let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, Vec::new());
+        let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, &[]);
 
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
