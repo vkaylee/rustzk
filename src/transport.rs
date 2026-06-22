@@ -162,14 +162,43 @@ impl ZK {
             ZKTransport::Tcp(ref mut reader) => {
                 let mut read_tcp_frame = || -> ZKResult<ZKPacket<'static>> {
                     let mut header = [0u8; 8];
-                    reader.read_exact(&mut header)?;
+                    // Read the first chunk (up to 8 bytes). If this blocks or times out,
+                    // 0 bytes have been consumed, so we are still in sync.
+                    let n = match reader.read(&mut header[..]) {
+                        Ok(0) => return Err(ZKError::Network(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "TCP connection closed (EOF)",
+                        ))),
+                        Ok(n) => n,
+                        Err(e) => return Err(ZKError::Network(e)),
+                    };
+
+                    // If we read less than 8 bytes, we must read the rest.
+                    // Any error here is a desync because we already consumed `n` bytes.
+                    if n < 8 {
+                        let mut rest = vec![0u8; 8 - n];
+                        if let Err(e) = reader.read_exact(&mut rest) {
+                            return Err(ZKError::Network(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!("TCP desync: partial header read ({} bytes): {:?}", n, e),
+                            )));
+                        }
+                        header[n..8].copy_from_slice(&rest);
+                    }
+
                     let (length, _) = TCPWrapper::decode_header(&header)
                         .map_err(|e| ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, e.to_string()))?;
 
                     crate::security::validate_packet_size(length)?;
 
                     let mut body = vec![0u8; length];
-                    reader.read_exact(&mut body)?;
+                    // Any error reading the body is a desync since we already read the header.
+                    if let Err(e) = reader.read_exact(&mut body) {
+                        return Err(ZKError::Network(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("TCP desync: failed to read body of size {}: {:?}", length, e),
+                        )));
+                    }
 
                     let packet = ZKPacket::from_bytes_owned(body)?;
                     if !packet.verify_checksum(self.use_legacy_checksum) {
@@ -190,7 +219,7 @@ impl ZK {
                         _ => false,
                     };
                     if !is_timeout {
-                        log::warn!("TCP stream desynchronized or hard failed. Closing transport: {:?}", e);
+                        log::warn!("TCP stream error (hard failure or desync). Closing transport: {:?}", e);
                         self.is_connected = false;
                         self.transport = None;
                     }
@@ -580,6 +609,38 @@ impl ZK {
                 Err(e)
             }
         }
+    }
+
+    pub(crate) fn send_exit_packet(&mut self) -> std::io::Result<()> {
+        if let Some(ref mut transport) = self.transport {
+            self.reply_id = self.reply_id.wrapping_add(1);
+            if self.reply_id == USHRT_MAX {
+                self.reply_id -= USHRT_MAX;
+            }
+
+            let packet = if self.use_legacy_checksum {
+                ZKPacket::new_with_legacy(CMD_EXIT, self.session_id, self.reply_id, &[])
+            } else {
+                ZKPacket::new(CMD_EXIT, self.session_id, self.reply_id, &[])
+            };
+
+            match transport {
+                ZKTransport::Tcp(ref mut reader) => {
+                    self.write_buf.clear();
+                    self.write_buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
+                    self.write_buf.write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
+                    self.write_buf.write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
+                    packet.to_bytes_into(&mut self.write_buf)?;
+                    reader.get_mut().write_all(&self.write_buf)?;
+                }
+                ZKTransport::Udp(ref mut socket) => {
+                    self.write_buf.clear();
+                    packet.to_bytes_into(&mut self.write_buf)?;
+                    socket.send(&self.write_buf)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn disconnect(&mut self) -> ZKResult<()> {

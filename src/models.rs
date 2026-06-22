@@ -85,7 +85,11 @@ impl Attendance {
                 None => unreachable!(),
             }
         });
-        offset.from_local_datetime(&self.timestamp).single()
+        match offset.from_local_datetime(&self.timestamp) {
+            chrono::LocalResult::Single(dt) => Some(dt),
+            chrono::LocalResult::Ambiguous(dt1, _) => Some(dt1),
+            chrono::LocalResult::None => None,
+        }
     }
 
     /// Returns the timestamp in UTC.

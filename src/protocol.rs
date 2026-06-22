@@ -17,6 +17,11 @@ pub fn calculate_checksum(data: &[u8]) -> u16 {
     let len = data.len();
 
     while i + 1 < len {
+        // Skip checksum field (bytes 2-3) if the slice represents a packet header
+        if len >= 8 && i == 2 {
+            i += 2;
+            continue;
+        }
         let val = u16::from_le_bytes([data[i], data[i + 1]]);
         checksum += val as u32;
         if checksum > USHRT_MAX as u32 {

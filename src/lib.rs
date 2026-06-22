@@ -329,9 +329,10 @@ impl ZK {
 
 impl Drop for ZK {
     fn drop(&mut self) {
-        // Only reset local connection state and let transport drop naturally.
-        // Doing network I/O in Drop is a blocking hang hazard.
-        self.is_connected = false;
+        if self.is_connected {
+            let _ = self.send_exit_packet();
+            self.is_connected = false;
+        }
         self.transport = None;
     }
 }

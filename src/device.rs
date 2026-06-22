@@ -155,15 +155,14 @@ impl ZK {
                 }
             });
 
-            offset
-                .from_local_datetime(&naive)
-                .single()
-                .ok_or_else(|| {
-                    ZKError::InvalidData(
-                        ZKErrorCode::InvalidDataFormat,
-                        "Ambiguous time from device".into(),
-                    )
-                })
+            match offset.from_local_datetime(&naive) {
+                chrono::LocalResult::Single(dt) => Ok(dt),
+                chrono::LocalResult::Ambiguous(dt1, _) => Ok(dt1),
+                chrono::LocalResult::None => Err(ZKError::InvalidData(
+                    ZKErrorCode::InvalidDataFormat,
+                    "Invalid local datetime from device".into(),
+                )),
+            }
         } else {
             Err(ZKError::Response(
                 ZKErrorCode::ProtocolViolation,

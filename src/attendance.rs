@@ -61,11 +61,14 @@ impl ZK {
         let mut uid_cache: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
         let mut bytes_cache: std::collections::HashMap<[u8; 24], String> = std::collections::HashMap::new();
 
+        let mut parsed = false;
+
         if record_size == ATT_RECORD_SIZE_8
-            || (record_size > 0
+            || (record_size >= ATT_RECORD_SIZE_8
                 && total_size.wrapping_rem(ATT_RECORD_SIZE_8) == 0
                 && record_size < 16)
         {
+            parsed = true;
             while offset + ATT_RECORD_SIZE_8 <= data.len() {
                 let chunk = &data[offset..offset + ATT_RECORD_SIZE_8];
                 let mut rdr = io::Cursor::new(chunk);
@@ -95,10 +98,11 @@ impl ZK {
                 offset += record_size;
             }
         } else if record_size == ATT_RECORD_SIZE_16
-            || (record_size > 0
+            || (record_size >= ATT_RECORD_SIZE_16
                 && record_size.wrapping_rem(ATT_RECORD_SIZE_16) == 0
                 && record_size < 40)
         {
+            parsed = true;
             while offset + ATT_RECORD_SIZE_16 <= data.len() {
                 let chunk = &data[offset..offset + ATT_RECORD_SIZE_16];
                 let mut rdr = io::Cursor::new(chunk);
@@ -126,9 +130,10 @@ impl ZK {
                     punch,
                     self.timezone_offset,
                 ));
-                offset += ATT_RECORD_SIZE_16;
+                offset += record_size; // Advancing by record_size (16 or larger multiple)
             }
         } else if record_size >= ATT_RECORD_SIZE_40 {
+            parsed = true;
             while offset + ATT_RECORD_SIZE_40 <= data.len() {
                 let chunk = &data[offset..offset + ATT_RECORD_SIZE_40];
                 let mut chunk_ptr = chunk;
@@ -169,6 +174,13 @@ impl ZK {
                 ));
                 offset += record_size;
             }
+        }
+
+        if !parsed {
+            return Err(ZKError::InvalidData(
+                ZKErrorCode::InvalidDataFormat,
+                format!("Unsupported or invalid attendance record size: {}", record_size),
+            ));
         }
 
         Ok(attendances)

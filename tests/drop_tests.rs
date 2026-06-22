@@ -43,6 +43,7 @@ fn test_zk_drop_auto_disconnects() {
                 CMD_EXIT => {
                     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
                     let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
+                    let _ = tx.send(true);
                     break;
                 }
                 _ => {}

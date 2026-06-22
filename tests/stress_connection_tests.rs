@@ -541,8 +541,8 @@ fn stress_handshake_timeout_recovery() {
 
 /// Stress test: 20 connect/disconnect cycles, counting CMD_EXIT on server side.
 /// For the first half, we call explicit disconnect() which sends CMD_EXIT.
-/// For the second half, we let Drop auto-disconnect, which closes the socket
-/// without sending CMD_EXIT (non-blocking design).
+/// For the second half, we let Drop auto-disconnect, which now also sends CMD_EXIT
+/// (non-blocking write) to release the session cleanly.
 #[test]
 fn stress_cmd_exit_always_sent() {
     let cycles = 20;
@@ -566,21 +566,21 @@ fn stress_cmd_exit_always_sent() {
             .unwrap_or_else(|e| panic!("Cycle {}: disconnect failed: {}", i, e));
     }
 
-    // Second half: let Drop auto-disconnect (closes socket without CMD_EXIT)
+    // Second half: let Drop auto-disconnect (now also sends CMD_EXIT)
     for i in half..cycles {
         let mut zk = ZK::new("127.0.0.1", port);
         zk.set_timeout(Duration::from_secs(5));
         zk.connect(ZKProtocol::TCP)
             .unwrap_or_else(|e| panic!("Cycle {}: connect failed: {}", i, e));
-        // No explicit disconnect — Drop should handle it by closing the connection
+        // No explicit disconnect — Drop should handle it by sending CMD_EXIT and closing the connection
     }
 
     handle.join().unwrap();
 
     let total_exits = exit_counter.load(Ordering::SeqCst);
     assert_eq!(
-        total_exits, half,
-        "Expected {} CMD_EXIT messages (only from explicit disconnect), got {}",
-        half, total_exits
+        total_exits, cycles,
+        "Expected {} CMD_EXIT messages (from both explicit disconnect and Drop), got {}",
+        cycles, total_exits
     );
 }
