@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.2] - 2026-06-22
+### Fixed
+- **Attendance Record Size Validation**: Enforced strict record size validation (8, 16, 40 bytes) in `attendance.rs`.
+- **TCP Connection Desynchronization**: Resolved session and packet alignment issues by closing and clearing the TCP socket on errors and timeouts.
+- **DST Transition Ambiguity**: Handled Chrono `LocalResult` transition ambiguity and fold cases in `models.rs` and `device.rs`.
+- **Session Leaks on Drop**: Added a non-blocking `CMD_EXIT` command on struct destruction (`Drop`) to gracefully close active sessions.
+- **Checksum Calculation Offset**: Automatically skip checksum bytes (positions 2-3) on raw packets for correct checksum verification.
+
+### Added
+- **Safety Integration Tests**: Added comprehensive unit and integration tests verifying all safety fixes (including `Drop` exit packet, ambiguous local time fold, calculate checksum offset, invalid attendance record size).
+
 ## [1.0.1] - 2026-06-21
 ### Added
 - **Connection Stress Tests**: Added 6 connection stress testing scenarios to ensure network resilience.

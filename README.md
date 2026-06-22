@@ -19,7 +19,7 @@ Add `rustzk` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rustzk = "0.3.1"
+rustzk = "1.0.2"
 ```
 
 ## 🚀 Quick Start
