@@ -1,88 +1,37 @@
+mod common;
+use common::{make_prepare_data_payload, MockZKServer};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use rustzk::constants::*;
-use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::{ZKProtocol, ZK};
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::thread;
+use std::io::Write;
+
+// ── test_get_templates_mock ───────────────────────────────────────────────
 
 #[test]
 fn test_get_templates_mock() {
     let _ = env_logger::builder().is_test(true).try_init();
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
-    let addr = listener.local_addr().unwrap();
-    let port = addr.port();
 
-    let server_handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let session_id = 1234;
-
-        loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes_owned(body).unwrap();
-
-            match packet.command() {
-                CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                CMD_GET_FREE_SIZES => {
-                    let mut bytes = vec![0u8; 80];
-                    <LittleEndian as ByteOrder>::write_i32(&mut bytes[24..28], 1); // 1 finger
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                _CMD_PREPARE_BUFFER => {
-                    let mut res_payload = vec![0u8; 5];
-                    res_payload[0] = 1;
-                    <LittleEndian as ByteOrder>::write_u32(&mut res_payload[1..5], 16); // 4 + 12
-                    let res =
-                        ZKPacket::new(CMD_PREPARE_DATA, session_id, packet.reply_id(), res_payload);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                _CMD_READ_BUFFER => {
-                    let mut data = Vec::new();
-                    data.write_i32::<LittleEndian>(12).unwrap(); // Total size
-                                                                 // Finger 1: size(2)=12, uid(2)=1, fid(1)=0, valid(1)=1, template(6)=[0xA..]
-                    data.write_u16::<LittleEndian>(12).unwrap();
-                    data.write_u16::<LittleEndian>(1).unwrap();
-                    data.write_u8(0).unwrap();
-                    data.write_u8(1).unwrap();
-                    data.write_all(&[0xAA; 6]).unwrap();
-
-                    let res = ZKPacket::new(CMD_DATA, session_id, packet.reply_id(), data);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                    break;
-                }
-                _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-            }
-        }
-    });
+    let (server, port) = MockZKServer::new()
+        .with_session(1234)
+        .on(CMD_GET_FREE_SIZES, |_rid, _| {
+            let mut bytes = vec![0u8; 80];
+            <LittleEndian as ByteOrder>::write_i32(&mut bytes[24..28], 1); // 1 finger
+            Some((CMD_ACK_OK, bytes))
+        })
+        .on(_CMD_PREPARE_BUFFER, |_rid, _| {
+            Some((CMD_PREPARE_DATA, make_prepare_data_payload(16)))
+        })
+        .on(_CMD_READ_BUFFER, |_rid, _| {
+            let mut data = Vec::new();
+            data.write_i32::<LittleEndian>(12).unwrap();
+            data.write_u16::<LittleEndian>(12).unwrap();
+            data.write_u16::<LittleEndian>(1).unwrap();
+            data.write_u8(0).unwrap();  // fid
+            data.write_u8(1).unwrap();  // valid
+            data.write_all(&[0xAA; 6]).unwrap();
+            Some((CMD_DATA, data))
+        })
+        .spawn();
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
@@ -94,66 +43,23 @@ fn test_get_templates_mock() {
     assert_eq!(templates[0].template(), vec![0xAA; 6]);
 
     zk.disconnect().unwrap();
-    server_handle.join().unwrap();
+    server.join();
 }
+
+// ── test_delete_user_template_mock ────────────────────────────────────────
 
 #[test]
 fn test_delete_user_template_mock() {
     let _ = env_logger::builder().is_test(true).try_init();
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
-    let addr = listener.local_addr().unwrap();
-    let port = addr.port();
 
-    let server_handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let session_id = 5678;
-
-        loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes_owned(body).unwrap();
-
-            match packet.command() {
-                CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                CMD_DELETE_USERTEMP => {
-                    assert_eq!(packet.payload().len(), 3);
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                CMD_REFRESHDATA => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                    break;
-                }
-                _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-            }
-        }
-    });
+    let (server, port) = MockZKServer::new()
+        .with_session(5678)
+        .on(CMD_DELETE_USERTEMP, |_rid, payload| {
+            assert_eq!(payload.len(), 3);
+            Some((CMD_ACK_OK, vec![]))
+        })
+        .on(CMD_REFRESHDATA, |_rid, _| Some((CMD_ACK_OK, vec![])))
+        .spawn();
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
@@ -162,5 +68,5 @@ fn test_delete_user_template_mock() {
     assert!(result.is_ok());
 
     zk.disconnect().unwrap();
-    server_handle.join().unwrap();
+    server.join();
 }

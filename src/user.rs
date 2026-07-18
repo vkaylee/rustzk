@@ -139,7 +139,9 @@ impl ZK {
         }
 
         // 4. Refresh device data once at the end
-        let _ = self.refresh_data();
+        if let Err(e) = self.refresh_data() {
+            log::warn!("Failed to refresh device data after bulk user set: {}", e);
+        }
         Ok(())
     }
 
@@ -147,7 +149,9 @@ impl ZK {
     /// High performance, suitable for bulk syncing.
     pub fn set_user_unchecked(&mut self, user: &User) -> ZKResult<()> {
         self.set_user_unchecked_no_refresh(user)?;
-        let _ = self.refresh_data();
+        if let Err(e) = self.refresh_data() {
+            log::warn!("Failed to refresh device data after set_user_unchecked: {}", e);
+        }
         Ok(())
     }
 
@@ -186,7 +190,9 @@ impl ZK {
             if let Some(ref mut cache) = self.user_id_cache {
                 cache.remove(&uid);
             }
-            let _ = self.refresh_data();
+            if let Err(e) = self.refresh_data() {
+                log::warn!("Failed to refresh device data after delete_user: {}", e);
+            }
             Ok(())
         } else {
             Err(ZKError::Response(
@@ -282,7 +288,9 @@ impl ZK {
 
         let res = self.send_command(CMD_DELETE_USERTEMP, &payload)?;
         if res.command() == CMD_ACK_OK {
-            let _ = self.refresh_data();
+            if let Err(e) = self.refresh_data() {
+                log::warn!("Failed to refresh device data after delete_user_template: {}", e);
+            }
             Ok(())
         } else {
             Err(ZKError::Response(

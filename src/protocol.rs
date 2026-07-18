@@ -268,6 +268,11 @@ impl<'a> ZKPacket<'a> {
                 "Packet too short",
             ));
         }
+
+        // Validate packet size bounds to catch malformed data early
+        if let Err(e) = crate::security::validate_packet_size(data.len()) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
+        }
         let mut rdr = Cursor::new(data);
         let command = rdr.read_u16::<LittleEndian>()?;
         let checksum = rdr.read_u16::<LittleEndian>()?;

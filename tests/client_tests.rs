@@ -5,6 +5,8 @@
     clippy::match_same_arms
 )]
 
+mod common;
+use common::MockZKServer;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use chrono::{Datelike, TimeZone};
 use rustzk::constants::*;
@@ -1204,54 +1206,13 @@ fn test_get_attendance_fetches_attlog_before_users() {
 
 #[test]
 fn test_set_time_mock() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
-    let addr = listener.local_addr().unwrap();
-    let port = addr.port();
-
-    let server_handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let session_id = 7777;
-
-        loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes_owned(body).unwrap();
-
-            match packet.command() {
-                CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                CMD_SET_TIME => {
-                    assert_eq!(packet.payload().len(), 4);
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                    break;
-                }
-                _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-            }
-        }
-    });
+    let (server, port) = MockZKServer::new()
+        .with_session(7777)
+        .on(CMD_SET_TIME, |_rid, payload| {
+            assert_eq!(payload.len(), 4);
+            Some((CMD_ACK_OK, vec![]))
+        })
+        .spawn();
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
@@ -1266,60 +1227,24 @@ fn test_set_time_mock() {
     assert!(result.is_ok());
 
     zk.disconnect().unwrap();
-    server_handle.join().unwrap();
+    server.join();
 }
 
 #[test]
 fn test_zk_is_alive_connected() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
-    let port = listener.local_addr().unwrap().port();
-
-    let server_handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let session_id = 9988;
-
-        loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes_owned(body).unwrap();
-
-            match packet.command() {
-                CMD_GET_TIME => {
-                    let time_payload = vec![0u8; 4];
-                    let res =
-                        ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), time_payload);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-                CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                    break;
-                }
-                _ => {
-                    let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
-                }
-            }
-        }
-    });
+    let (server, port) = MockZKServer::new()
+        .with_session(9988)
+        .on(CMD_GET_TIME, |_rid, _| {
+            Some((CMD_ACK_OK, vec![0u8; 4]))
+        })
+        .spawn();
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
     assert!(zk.is_alive());
 
     zk.disconnect().unwrap();
-    server_handle.join().unwrap();
+    server.join();
 }
 
 #[test]

@@ -79,12 +79,8 @@ impl Attendance {
         if self.timezone_offset.abs() > 1440 {
             return None;
         }
-        let offset = FixedOffset::east_opt(self.timezone_offset * 60).unwrap_or_else(|| {
-            match FixedOffset::east_opt(0) {
-                Some(o) => o,
-                None => unreachable!(),
-            }
-        });
+        let offset = FixedOffset::east_opt(self.timezone_offset * 60)
+            .or_else(|| FixedOffset::east_opt(0))?;
         match offset.from_local_datetime(&self.timestamp) {
             chrono::LocalResult::Single(dt) => Some(dt),
             chrono::LocalResult::Ambiguous(dt1, _) => Some(dt1),
@@ -307,10 +303,20 @@ impl User {
 
         payload.write_u32::<LittleEndian>(self.card)?;
         payload.write_u8(0)?; // pad
-        let group_id = self.group_id.parse::<u8>().unwrap_or(0);
+        let group_id = self.group_id.parse::<u8>().map_err(|_| {
+            ZKError::InvalidData(
+                crate::ZKErrorCode::InvalidDataFormat,
+                format!("Invalid group_id '{}': must be a u8 integer", self.group_id),
+            )
+        })?;
         payload.write_u8(group_id)?;
         payload.write_u16::<LittleEndian>(0)?; // timezone/pad
-        let user_id_num = self.user_id.parse::<u32>().unwrap_or(0);
+        let user_id_num = self.user_id.parse::<u32>().map_err(|_| {
+            ZKError::InvalidData(
+                crate::ZKErrorCode::InvalidDataFormat,
+                format!("Invalid user_id '{}': must be a u32 integer", self.user_id),
+            )
+        })?;
         payload.write_u32::<LittleEndian>(user_id_num)?;
 
         Ok(payload)

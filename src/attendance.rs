@@ -1,4 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
 use crate::constants::*;
@@ -16,8 +17,6 @@ impl ZK {
         }
 
         // Fetch raw attendance buffer FIRST, before any other buffer commands.
-        // Some firmware (e.g. ZAM180 Ver 6.60) loses buffer state after CMD_FREE_DATA
-        // sent at the end of get_users(), so attendance must be fetched first.
         let attendance_data = self.read_with_buffer(CMD_ATTLOG_RRQ, 0, 0)?;
         if attendance_data.len() < 4 {
             return Ok(Vec::new());
@@ -33,157 +32,11 @@ impl ZK {
                 ),
             ));
         }
-        let mut record_size = if self.records > 0 && total_size > 0 {
-            total_size / self.records as usize
-        } else {
-            0
-        };
 
-        // Heuristic: Prefer standard record sizes if total_size is a multiple
-        if total_size > 0 {
-            if total_size.is_multiple_of(40) && (record_size == 0 || record_size.is_multiple_of(40))
-            {
-                record_size = 40;
-            } else if total_size.is_multiple_of(16)
-                && (record_size == 0 || record_size.is_multiple_of(16))
-            {
-                record_size = 16;
-            } else if total_size.is_multiple_of(8)
-                && (record_size == 0 || record_size.is_multiple_of(8))
-            {
-                record_size = 8;
-            }
-        }
-
+        let record_size = detect_record_size(total_size, self.records as usize);
         let data = &attendance_data[4..];
 
-        let mut attendances = Vec::with_capacity(std::cmp::min(
-            self.records as usize,
-            data.len() / record_size,
-        ));
-        let mut offset = 0;
-
-        let mut uid_cache: std::collections::HashMap<u32, String> =
-            std::collections::HashMap::new();
-        let mut bytes_cache: std::collections::HashMap<[u8; 24], String> =
-            std::collections::HashMap::new();
-
-        let mut parsed = false;
-
-        if record_size == ATT_RECORD_SIZE_8
-            || (record_size >= ATT_RECORD_SIZE_8
-                && total_size.wrapping_rem(ATT_RECORD_SIZE_8) == 0
-                && record_size < 16)
-        {
-            parsed = true;
-            while offset + ATT_RECORD_SIZE_8 <= data.len() {
-                let chunk = &data[offset..offset + ATT_RECORD_SIZE_8];
-                let mut rdr = io::Cursor::new(chunk);
-                let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
-                let status = rdr.read_u8()?;
-                let mut time_bytes = [0u8; 4];
-                rdr.read_exact(&mut time_bytes)?;
-                let punch = rdr.read_u8()?;
-
-                let timestamp = ZK::decode_time(&time_bytes)?;
-                let user_id = if let Some(cached) = uid_cache.get(&(uid as u32)) {
-                    cached.clone()
-                } else {
-                    let id = self.get_user_id_from_cache(uid);
-                    uid_cache.insert(uid as u32, id.clone());
-                    id
-                };
-
-                attendances.push(Attendance::new(
-                    uid as u32,
-                    user_id,
-                    timestamp,
-                    status,
-                    punch,
-                    self.timezone_offset,
-                ));
-                offset += record_size;
-            }
-        } else if record_size == ATT_RECORD_SIZE_16
-            || (record_size >= ATT_RECORD_SIZE_16
-                && record_size.wrapping_rem(ATT_RECORD_SIZE_16) == 0
-                && record_size < 40)
-        {
-            parsed = true;
-            while offset + ATT_RECORD_SIZE_16 <= data.len() {
-                let chunk = &data[offset..offset + ATT_RECORD_SIZE_16];
-                let mut rdr = io::Cursor::new(chunk);
-                let user_id_num = rdr.read_u32::<byteorder::LittleEndian>()?;
-                let mut time_bytes = [0u8; 4];
-                rdr.read_exact(&mut time_bytes)?;
-                let status = rdr.read_u8()?;
-                let punch = rdr.read_u8()?;
-
-                let timestamp = ZK::decode_time(&time_bytes)?;
-                let uid = user_id_num;
-                let user_id = if let Some(cached) = uid_cache.get(&uid) {
-                    cached.clone()
-                } else {
-                    let id = user_id_num.to_string();
-                    uid_cache.insert(uid, id.clone());
-                    id
-                };
-
-                attendances.push(Attendance::new(
-                    uid,
-                    user_id,
-                    timestamp,
-                    status,
-                    punch,
-                    self.timezone_offset,
-                ));
-                offset += record_size; // Advancing by record_size (16 or larger multiple)
-            }
-        } else if record_size >= ATT_RECORD_SIZE_40 {
-            parsed = true;
-            while offset + ATT_RECORD_SIZE_40 <= data.len() {
-                let chunk = &data[offset..offset + ATT_RECORD_SIZE_40];
-                let mut chunk_ptr = chunk;
-                if chunk.starts_with(b"\xff255\x00\x00\x00\x00\x00") {
-                    chunk_ptr = &chunk[10..];
-                    if chunk_ptr.len() < 30 {
-                        break;
-                    }
-                }
-
-                let mut rdr = io::Cursor::new(chunk_ptr);
-                let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
-                let mut user_id_bytes = [0u8; 24];
-                rdr.read_exact(&mut user_id_bytes)?;
-                let status = rdr.read_u8()?;
-                let mut time_bytes = [0u8; 4];
-                rdr.read_exact(&mut time_bytes)?;
-                let punch = rdr.read_u8()?;
-
-                let timestamp = ZK::decode_time(&time_bytes)?;
-                let user_id = if let Some(cached) = bytes_cache.get(&user_id_bytes) {
-                    cached.clone()
-                } else {
-                    let id = String::from_utf8_lossy(&user_id_bytes)
-                        .trim_matches('\0')
-                        .to_string();
-                    bytes_cache.insert(user_id_bytes, id.clone());
-                    id
-                };
-
-                attendances.push(Attendance::new(
-                    uid as u32,
-                    user_id,
-                    timestamp,
-                    status,
-                    punch,
-                    self.timezone_offset,
-                ));
-                offset += record_size;
-            }
-        }
-
-        if !parsed {
+        if !can_parse_record_size(record_size, total_size) {
             return Err(ZKError::InvalidData(
                 ZKErrorCode::InvalidDataFormat,
                 format!(
@@ -191,6 +44,25 @@ impl ZK {
                     record_size
                 ),
             ));
+        }
+
+        let capacity = std::cmp::min(self.records as usize, data.len() / record_size);
+        let mut attendances = Vec::with_capacity(capacity);
+
+        let mut uid_cache: HashMap<u32, String> = HashMap::new();
+        let mut bytes_cache: HashMap<[u8; 24], String> = HashMap::new();
+        let tz = self.timezone_offset;
+
+        let is_8 = record_size_is(record_size, total_size, ATT_RECORD_SIZE_8);
+        let is_16 = !is_8 && record_size_is(record_size, total_size, ATT_RECORD_SIZE_16);
+        let is_40 = !is_8 && !is_16 && record_size >= ATT_RECORD_SIZE_40;
+
+        if is_8 {
+            parse_records_8(data, record_size, &mut attendances, &mut uid_cache, self, tz)?;
+        } else if is_16 {
+            parse_records_16(data, record_size, &mut attendances, &mut uid_cache, tz)?;
+        } else if is_40 {
+            parse_records_40(data, record_size, &mut attendances, &mut bytes_cache, tz)?;
         }
 
         Ok(attendances)
@@ -291,7 +163,6 @@ impl ZK {
                             continue;
                         }
 
-                        // Decode event data based on length (matching pyzk logic)
                         let (uid, user_id, status, punch, timestamp) =
                             if data.len() == EVENT_DATA_LEN_10 {
                                 let uid = LittleEndian::read_u16(&data[0..2]) as u32;
@@ -356,4 +227,175 @@ impl ZK {
             }
         }))
     }
+}
+
+// ── Private helpers for attendance record parsing ──────────────────────────
+
+/// Detect the best record size from total_size and record count using
+/// heuristic divisibility checks, preferring larger standard sizes.
+fn detect_record_size(total_size: usize, records: usize) -> usize {
+    let mut record_size = if records > 0 && total_size > 0 {
+        total_size / records
+    } else {
+        0
+    };
+
+    if total_size > 0 {
+        if total_size.is_multiple_of(40) && (record_size == 0 || record_size.is_multiple_of(40)) {
+            record_size = 40;
+        } else if total_size.is_multiple_of(16)
+            && (record_size == 0 || record_size.is_multiple_of(16))
+        {
+            record_size = 16;
+        } else if total_size.is_multiple_of(8)
+            && (record_size == 0 || record_size.is_multiple_of(8))
+        {
+            record_size = 8;
+        }
+    }
+
+    record_size
+}
+
+/// Returns true if the record_size is compatible with the standard size `std`,
+/// considering modulo alignment.
+fn record_size_is(record_size: usize, total_size: usize, std: usize) -> bool {
+    record_size == std
+        || (record_size >= std
+            && total_size.wrapping_rem(std) == 0
+            && record_size < std * 5)
+}
+
+/// Returns true if we have a parser for this record_size.
+fn can_parse_record_size(record_size: usize, total_size: usize) -> bool {
+    record_size_is(record_size, total_size, ATT_RECORD_SIZE_8)
+        || record_size_is(record_size, total_size, ATT_RECORD_SIZE_16)
+        || record_size >= ATT_RECORD_SIZE_40
+}
+
+/// Parse attendance records in 8-byte format.
+/// Layout: uid(u16) + status(u8) + time(u32) + punch(u8)
+fn parse_records_8(
+    data: &[u8],
+    record_size: usize,
+    out: &mut Vec<Attendance>,
+    uid_cache: &mut HashMap<u32, String>,
+    zk: &mut ZK,
+    tz_offset: i32,
+) -> ZKResult<()> {
+    let chunk_size = ATT_RECORD_SIZE_8;
+    let mut offset = 0;
+
+    while offset + chunk_size <= data.len() {
+        let chunk = &data[offset..offset + chunk_size];
+        let mut rdr = io::Cursor::new(chunk);
+        let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
+        let status = rdr.read_u8()?;
+        let mut time_bytes = [0u8; 4];
+        rdr.read_exact(&mut time_bytes)?;
+        let punch = rdr.read_u8()?;
+
+        let timestamp = ZK::decode_time(&time_bytes)?;
+        let user_id = uid_cache
+            .get(&(uid as u32))
+            .cloned()
+            .unwrap_or_else(|| {
+                let id = zk.get_user_id_from_cache(uid);
+                uid_cache.insert(uid as u32, id.clone());
+                id
+            });
+
+        out.push(Attendance::new(uid as u32, user_id, timestamp, status, punch, tz_offset));
+        offset += record_size;
+    }
+    Ok(())
+}
+
+/// Parse attendance records in 16-byte format.
+/// Layout: user_id(u32) + time(u32) + status(u8) + punch(u8) + reserved(2) + workcode(u32)
+fn parse_records_16(
+    data: &[u8],
+    record_size: usize,
+    out: &mut Vec<Attendance>,
+    uid_cache: &mut HashMap<u32, String>,
+    tz_offset: i32,
+) -> ZKResult<()> {
+    let chunk_size = ATT_RECORD_SIZE_16;
+    let mut offset = 0;
+
+    while offset + chunk_size <= data.len() {
+        let chunk = &data[offset..offset + chunk_size];
+        let mut rdr = io::Cursor::new(chunk);
+        let user_id_num = rdr.read_u32::<byteorder::LittleEndian>()?;
+        let mut time_bytes = [0u8; 4];
+        rdr.read_exact(&mut time_bytes)?;
+        let status = rdr.read_u8()?;
+        let punch = rdr.read_u8()?;
+
+        let timestamp = ZK::decode_time(&time_bytes)?;
+        let user_id = uid_cache
+            .get(&user_id_num)
+            .cloned()
+            .unwrap_or_else(|| {
+                let id = user_id_num.to_string();
+                uid_cache.insert(user_id_num, id.clone());
+                id
+            });
+
+        out.push(Attendance::new(user_id_num, user_id, timestamp, status, punch, tz_offset));
+        offset += record_size;
+    }
+    Ok(())
+}
+
+/// Parse attendance records in 40-byte format.
+/// Layout: uid(u16) + maybe_bom(10 bytes, optional) + user_id(24 bytes) +
+///         status(u8) + time(u32) + punch(u8) + reserved
+fn parse_records_40(
+    data: &[u8],
+    record_size: usize,
+    out: &mut Vec<Attendance>,
+    bytes_cache: &mut HashMap<[u8; 24], String>,
+    tz_offset: i32,
+) -> ZKResult<()> {
+    let chunk_size = ATT_RECORD_SIZE_40;
+    let mut offset = 0;
+
+    while offset + chunk_size <= data.len() {
+        let chunk = &data[offset..offset + chunk_size];
+        let mut chunk_ptr = chunk;
+
+        // Skip BOM-like prefix if present (e.g., b"\xff255\x00\x00\x00\x00\x00")
+        if chunk.starts_with(b"\xff255\x00\x00\x00\x00\x00") {
+            chunk_ptr = &chunk[10..];
+            if chunk_ptr.len() < 30 {
+                break;
+            }
+        }
+
+        let mut rdr = io::Cursor::new(chunk_ptr);
+        let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
+        let mut user_id_bytes = [0u8; 24];
+        rdr.read_exact(&mut user_id_bytes)?;
+        let status = rdr.read_u8()?;
+        let mut time_bytes = [0u8; 4];
+        rdr.read_exact(&mut time_bytes)?;
+        let punch = rdr.read_u8()?;
+
+        let timestamp = ZK::decode_time(&time_bytes)?;
+        let user_id = bytes_cache
+            .get(&user_id_bytes)
+            .cloned()
+            .unwrap_or_else(|| {
+                let id = String::from_utf8_lossy(&user_id_bytes)
+                    .trim_matches('\0')
+                    .to_string();
+                bytes_cache.insert(user_id_bytes, id.clone());
+                id
+            });
+
+        out.push(Attendance::new(uid as u32, user_id, timestamp, status, punch, tz_offset));
+        offset += record_size;
+    }
+    Ok(())
 }
