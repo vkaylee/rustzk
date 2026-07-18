@@ -1,0 +1,38 @@
+[devkit]
+version = "v0.3.0"
+install = "per-project"
+source = "release"
+
+[project]
+name = "rustzk"
+namespace = "rustzk"
+languages = ["rust"]
+
+# ── Services ─────────────────────────────────────────────────────────────────
+# Single container using the devkit's default Rust image.
+# Dockerfile: .leedevkit/container/rust/Dockerfile (auto-provided)
+# To customize: create .compose/docker-compose.test.yml (takes priority)
+
+[services.rust]
+lang = "rust"
+cargo = true
+rust_version = "1.87"
+
+# ── Targets ─────────────────────────────────────────────────────────────────
+# "all" runs the full Rust pipeline: fmt → clippy → test → coverage
+
+[targets]
+rust = ["rust"]
+all = ["rust"]
+
+# ── AI Context ──────────────────────────────────────────────────────────────
+
+[ai]
+extra_rules = []
+rules_dir = ".agent/rules"
+override_manifest = ".agent/overrides.yaml"
+
+# ── Community Add-ons ───────────────────────────────────────────────────────
+
+[addons]
+skills = []

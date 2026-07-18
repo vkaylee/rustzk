@@ -8,3 +8,11 @@ package.json
 CLAUDE.md
 /logs/
 /coverage/
+
+# DevKit (per-project install)
+.leedevkit/
+leedevkit
+leedevkit.lock
+.venv/
+.coverage
+.test_logs/

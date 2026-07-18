@@ -1,0 +1,20 @@
+# =============================================================================
+# AI Agent Rule Override Manifest — rustzk
+# =============================================================================
+# Controls which devkit base rules are used, replaced, or extended.
+#
+# Priority chain (highest to lowest):
+#   1. project/.agent/rules/<name>.md      (project override)
+#   2. devkit/.agent/rules/<name>.md       (devkit base)
+#
+# Actions:
+#   replace: rules — project version replaces devkit entirely
+#   add: rules     — project-only rules (no devkit counterpart)
+#   extend: rules  — project appends to devkit (both loaded)
+
+replace: []
+
+add:
+  - devkit-internals.md
+
+extend: []
