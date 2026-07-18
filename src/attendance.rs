@@ -1,12 +1,81 @@
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 
 use crate::constants::*;
 use crate::models::Attendance;
 use crate::protocol::ZKPacket;
-use crate::transport::ZKTransport;
 use crate::{ZKError, ZKErrorCode, ZKResult, ZK};
+
+/// Parsed real-time event data extracted from a REG_EVENT packet payload.
+#[derive(Debug)]
+struct EventData {
+    uid: u32,
+    user_id: String,
+    status: u8,
+    punch: u8,
+    timestamp: chrono::NaiveDateTime,
+}
+
+/// Parse a REG_EVENT payload into structured [`EventData`].
+///
+/// Supports three wire formats:
+/// - 10-byte: uid(u16) + status(u8) + punch(u8) + time(6)
+/// - 12-byte: user_id_num(u32) + status(u8) + punch(u8) + time(6)
+/// - 32-byte: user_id_str(24) + status(u8) + punch(u8) + time(6) + ...
+///
+/// For 10/12-byte formats the returned `user_id` is the raw uid as a string;
+/// the caller should resolve it via the user-id cache. For 32-byte format
+/// the `user_id` is already the final string.
+fn parse_event_data(data: &[u8]) -> ZKResult<EventData> {
+    if data.len() == EVENT_DATA_LEN_10 {
+        let uid = LittleEndian::read_u16(&data[0..2]) as u32;
+        let status = data[2];
+        let punch = data[3];
+        let timehex = &data[4..10];
+        let timestamp = ZK::decode_timehex(timehex)?;
+        Ok(EventData {
+            uid,
+            user_id: uid.to_string(),
+            status,
+            punch,
+            timestamp,
+        })
+    } else if data.len() == EVENT_DATA_LEN_12 {
+        let user_id_num = LittleEndian::read_u32(&data[0..4]);
+        let status = data[4];
+        let punch = data[5];
+        let timehex = &data[6..12];
+        let timestamp = ZK::decode_timehex(timehex)?;
+        Ok(EventData {
+            uid: user_id_num,
+            user_id: user_id_num.to_string(),
+            status,
+            punch,
+            timestamp,
+        })
+    } else if data.len() >= EVENT_DATA_LEN_32 {
+        let user_id = String::from_utf8_lossy(&data[0..24])
+            .trim_matches('\0')
+            .to_string();
+        let status = data[24];
+        let punch = data[25];
+        let timehex = &data[26..32];
+        let timestamp = ZK::decode_timehex(timehex)?;
+        Ok(EventData {
+            uid: 0,
+            user_id,
+            status,
+            punch,
+            timestamp,
+        })
+    } else {
+        Err(ZKError::InvalidData(
+            ZKErrorCode::InvalidDataFormat,
+            format!("Unknown event data length: {}", data.len()),
+        ))
+    }
+}
 
 impl ZK {
     /// Retrieves all attendance records from the device.
@@ -58,7 +127,14 @@ impl ZK {
         let is_40 = !is_8 && !is_16 && record_size >= ATT_RECORD_SIZE_40;
 
         if is_8 {
-            parse_records_8(data, record_size, &mut attendances, &mut uid_cache, self, tz)?;
+            parse_records_8(
+                data,
+                record_size,
+                &mut attendances,
+                &mut uid_cache,
+                self,
+                tz,
+            )?;
         } else if is_16 {
             parse_records_16(data, record_size, &mut attendances, &mut uid_cache, tz)?;
         } else if is_40 {
@@ -86,29 +162,8 @@ impl ZK {
 
     /// Internal helper to send a simple ACK_OK response.
     pub(crate) fn send_ack_ok(&mut self) -> ZKResult<()> {
-        let transport = self.transport.as_mut().ok_or_else(|| {
-            ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
-        })?;
         let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, &[]);
-
-        match transport {
-            ZKTransport::Tcp(ref mut reader) => {
-                self.write_buf.clear();
-                self.write_buf
-                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
-                self.write_buf
-                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
-                self.write_buf.write_u32::<LittleEndian>(8)?;
-                packet.to_bytes_into(&mut self.write_buf)?;
-                reader.get_mut().write_all(&self.write_buf)?;
-            }
-            ZKTransport::Udp(ref mut socket) => {
-                self.write_buf.clear();
-                packet.to_bytes_into(&mut self.write_buf)?;
-                socket.send(&self.write_buf)?;
-            }
-        }
-        Ok(())
+        self.send_packet(&packet)
     }
 
     /// Decodes a 6-byte compressed time format used in real-time events.
@@ -139,91 +194,57 @@ impl ZK {
     /// Listens for real-time events and yields attendance records as they occur.
     /// This is a blocking call that will yield None on timeout.
     pub fn listen_events(&mut self) -> ZKResult<impl Iterator<Item = ZKResult<Attendance>> + '_> {
-        // 1. Register for attendance log events if not already done
         self.reg_event(EF_ATTLOG)?;
 
-        Ok(std::iter::from_fn(move || {
-            loop {
-                match self.read_packet() {
-                    Ok(packet) => {
-                        let _ = self.send_ack_ok();
+        Ok(std::iter::from_fn(move || loop {
+            match self.read_packet() {
+                Ok(packet) => {
+                    let _ = self.send_ack_ok();
 
-                        if packet.command() != CMD_REG_EVENT {
-                            return Some(Err(ZKError::Response(
-                                ZKErrorCode::ProtocolViolation,
-                                format!(
-                                    "Unexpected command during event listening: {}",
-                                    packet.command()
-                                ),
-                            )));
-                        }
-
-                        let data = packet.payload();
-                        if data.is_empty() {
-                            continue;
-                        }
-
-                        let (uid, user_id, status, punch, timestamp) =
-                            if data.len() == EVENT_DATA_LEN_10 {
-                                let uid = LittleEndian::read_u16(&data[0..2]) as u32;
-                                let status = data[2];
-                                let punch = data[3];
-                                let timehex = &data[4..10];
-                                let ts = match ZK::decode_timehex(timehex) {
-                                    Ok(ts) => ts,
-                                    Err(e) => return Some(Err(e)),
-                                };
-                                let user_id = self.get_user_id_from_cache(uid as u16);
-                                (uid, user_id, status, punch, ts)
-                            } else if data.len() == EVENT_DATA_LEN_12 {
-                                let user_id_num = LittleEndian::read_u32(&data[0..4]);
-                                let status = data[4];
-                                let punch = data[5];
-                                let timehex = &data[6..12];
-                                let ts = match ZK::decode_timehex(timehex) {
-                                    Ok(ts) => ts,
-                                    Err(e) => return Some(Err(e)),
-                                };
-                                let user_id = self.get_user_id_from_cache(user_id_num as u16);
-                                (user_id_num, user_id, status, punch, ts)
-                            } else if data.len() >= EVENT_DATA_LEN_32 {
-                                let user_id = String::from_utf8_lossy(&data[0..24])
-                                    .trim_matches('\0')
-                                    .to_string();
-                                let status = data[24];
-                                let punch = data[25];
-                                let timehex = &data[26..32];
-                                let ts = match ZK::decode_timehex(timehex) {
-                                    Ok(ts) => ts,
-                                    Err(e) => return Some(Err(e)),
-                                };
-                                (0, user_id, status, punch, ts)
-                            } else {
-                                return Some(Err(ZKError::InvalidData(
-                                    ZKErrorCode::InvalidDataFormat,
-                                    format!("Unknown event data length: {}", data.len()),
-                                )));
-                            };
-
-                        return Some(Ok(Attendance::new(
-                            uid,
-                            user_id,
-                            timestamp,
-                            status,
-                            punch,
-                            self.timezone_offset,
+                    if packet.command() != CMD_REG_EVENT {
+                        return Some(Err(ZKError::Response(
+                            ZKErrorCode::ProtocolViolation,
+                            format!(
+                                "Unexpected command during event listening: {}",
+                                packet.command()
+                            ),
                         )));
                     }
-                    Err(ZKError::Network(ref e))
-                        if e.kind() == std::io::ErrorKind::WouldBlock
-                            || e.kind() == std::io::ErrorKind::TimedOut =>
-                    {
+
+                    let data = packet.payload();
+                    if data.is_empty() {
                         continue;
                     }
-                    Err(e) => {
-                        return Some(Err(e));
-                    }
+
+                    let event = match parse_event_data(data) {
+                        Ok(e) => e,
+                        Err(e) => return Some(Err(e)),
+                    };
+
+                    // Resolve user_id from cache for 10/12-byte formats.
+                    // 32-byte format already carries the string user_id.
+                    let user_id = if data.len() >= EVENT_DATA_LEN_32 {
+                        event.user_id
+                    } else {
+                        self.get_user_id_from_cache(event.uid as u16)
+                    };
+
+                    return Some(Ok(Attendance::new(
+                        event.uid,
+                        user_id,
+                        event.timestamp,
+                        event.status,
+                        event.punch,
+                        self.timezone_offset,
+                    )));
                 }
+                Err(ZKError::Network(ref e))
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    continue;
+                }
+                Err(e) => return Some(Err(e)),
             }
         }))
     }
@@ -261,9 +282,7 @@ fn detect_record_size(total_size: usize, records: usize) -> usize {
 /// considering modulo alignment.
 fn record_size_is(record_size: usize, total_size: usize, std: usize) -> bool {
     record_size == std
-        || (record_size >= std
-            && total_size.wrapping_rem(std) == 0
-            && record_size < std * 5)
+        || (record_size >= std && total_size.wrapping_rem(std) == 0 && record_size < std * 5)
 }
 
 /// Returns true if we have a parser for this record_size.
@@ -296,16 +315,15 @@ fn parse_records_8(
         let punch = rdr.read_u8()?;
 
         let timestamp = ZK::decode_time(&time_bytes)?;
-        let user_id = uid_cache
-            .get(&(uid as u32))
-            .cloned()
-            .unwrap_or_else(|| {
-                let id = zk.get_user_id_from_cache(uid);
-                uid_cache.insert(uid as u32, id.clone());
-                id
-            });
+        let user_id = uid_cache.get(&(uid as u32)).cloned().unwrap_or_else(|| {
+            let id = zk.get_user_id_from_cache(uid);
+            uid_cache.insert(uid as u32, id.clone());
+            id
+        });
 
-        out.push(Attendance::new(uid as u32, user_id, timestamp, status, punch, tz_offset));
+        out.push(Attendance::new(
+            uid as u32, user_id, timestamp, status, punch, tz_offset,
+        ));
         offset += record_size;
     }
     Ok(())
@@ -333,16 +351,20 @@ fn parse_records_16(
         let punch = rdr.read_u8()?;
 
         let timestamp = ZK::decode_time(&time_bytes)?;
-        let user_id = uid_cache
-            .get(&user_id_num)
-            .cloned()
-            .unwrap_or_else(|| {
-                let id = user_id_num.to_string();
-                uid_cache.insert(user_id_num, id.clone());
-                id
-            });
+        let user_id = uid_cache.get(&user_id_num).cloned().unwrap_or_else(|| {
+            let id = user_id_num.to_string();
+            uid_cache.insert(user_id_num, id.clone());
+            id
+        });
 
-        out.push(Attendance::new(user_id_num, user_id, timestamp, status, punch, tz_offset));
+        out.push(Attendance::new(
+            user_id_num,
+            user_id,
+            timestamp,
+            status,
+            punch,
+            tz_offset,
+        ));
         offset += record_size;
     }
     Ok(())
@@ -383,19 +405,99 @@ fn parse_records_40(
         let punch = rdr.read_u8()?;
 
         let timestamp = ZK::decode_time(&time_bytes)?;
-        let user_id = bytes_cache
-            .get(&user_id_bytes)
-            .cloned()
-            .unwrap_or_else(|| {
-                let id = String::from_utf8_lossy(&user_id_bytes)
-                    .trim_matches('\0')
-                    .to_string();
-                bytes_cache.insert(user_id_bytes, id.clone());
-                id
-            });
+        let user_id = bytes_cache.get(&user_id_bytes).cloned().unwrap_or_else(|| {
+            let id = String::from_utf8_lossy(&user_id_bytes)
+                .trim_matches('\0')
+                .to_string();
+            bytes_cache.insert(user_id_bytes, id.clone());
+            id
+        });
 
-        out.push(Attendance::new(uid as u32, user_id, timestamp, status, punch, tz_offset));
+        out.push(Attendance::new(
+            uid as u32, user_id, timestamp, status, punch, tz_offset,
+        ));
         offset += record_size;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use byteorder::{LittleEndian, WriteBytesExt};
+
+    #[test]
+    fn test_parse_event_data_10byte() {
+        let mut data = Vec::new();
+        data.write_u16::<LittleEndian>(101).unwrap(); // uid
+        data.push(1); // status
+        data.push(0); // punch
+        data.extend_from_slice(&[26, 2, 20, 10, 30, 0]); // timehex: 2026-02-20 10:30:00
+
+        let event = parse_event_data(&data).unwrap();
+        assert_eq!(event.uid, 101);
+        assert_eq!(event.user_id, "101");
+        assert_eq!(event.status, 1);
+        assert_eq!(event.punch, 0);
+        assert_eq!(event.timestamp.to_string(), "2026-02-20 10:30:00");
+    }
+
+    #[test]
+    fn test_parse_event_data_12byte() {
+        let mut data = Vec::new();
+        data.write_u32::<LittleEndian>(9999).unwrap(); // user_id_num
+        data.push(2); // status
+        data.push(3); // punch
+        data.extend_from_slice(&[26, 2, 20, 15, 0, 0]); // timehex: 2026-02-20 15:00:00
+
+        let event = parse_event_data(&data).unwrap();
+        assert_eq!(event.uid, 9999);
+        assert_eq!(event.user_id, "9999");
+        assert_eq!(event.status, 2);
+        assert_eq!(event.punch, 3);
+        assert_eq!(event.timestamp.to_string(), "2026-02-20 15:00:00");
+    }
+
+    #[test]
+    fn test_parse_event_data_32byte() {
+        let mut data = vec![0u8; 32];
+        data[..13].copy_from_slice(b"RUST-USER-001");
+        data[24] = 1; // status
+        data[25] = 0; // punch
+        data[26..32].copy_from_slice(&[26, 2, 20, 15, 0, 0]); // timehex
+
+        let event = parse_event_data(&data).unwrap();
+        assert_eq!(event.uid, 0);
+        assert_eq!(event.user_id, "RUST-USER-001");
+        assert_eq!(event.status, 1);
+        assert_eq!(event.punch, 0);
+        assert_eq!(event.timestamp.to_string(), "2026-02-20 15:00:00");
+    }
+
+    #[test]
+    fn test_parse_event_data_unknown_length() {
+        // 5 bytes doesn't match any known format
+        let data = vec![0u8; 5];
+        let err = parse_event_data(&data).unwrap_err();
+        assert!(matches!(
+            err,
+            ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, _)
+        ));
+    }
+
+    #[test]
+    fn test_parse_event_data_invalid_timehex() {
+        // 10-byte format with invalid timehex (all zeros = year 2000, month 0 — invalid)
+        let mut data = Vec::new();
+        data.write_u16::<LittleEndian>(1).unwrap();
+        data.push(0);
+        data.push(0);
+        data.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // month=0 is invalid
+
+        let err = parse_event_data(&data).unwrap_err();
+        assert!(matches!(
+            err,
+            ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, _)
+        ));
+    }
 }

@@ -1,11 +1,14 @@
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::{ZKError, ZKProtocol, ZK};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+
+mod common;
+use common::{read_request, send_response, try_read_request};
 
 /// Test: Transport is cleaned up when handshake fails.
 /// After a failed connect(), calling connect() again should succeed
@@ -19,21 +22,12 @@ fn test_transport_cleaned_on_handshake_failure() {
 
     let handle1 = thread::spawn(move || {
         let (mut stream, _) = listener1.accept().expect("Failed to accept connection");
-
-        // Read the CMD_CONNECT
-        let mut header = [0u8; 8];
-        stream.read_exact(&mut header).unwrap();
-        let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-        let mut body = vec![0u8; length];
-        stream.read_exact(&mut body).unwrap();
-        let packet = ZKPacket::from_bytes(&body).unwrap();
+        let packet = read_request(&mut stream);
         assert_eq!(packet.command(), CMD_CONNECT);
 
         // Send invalid response (not CMD_ACK_OK or CMD_ACK_UNAUTH)
         let res = ZKPacket::new(CMD_ACK_ERROR, 0, packet.reply_id(), vec![]);
-        stream
-            .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-            .unwrap();
+        send_response(&mut stream, &res);
     });
 
     let mut zk = ZK::new("127.0.0.1", port1);
@@ -58,21 +52,15 @@ fn test_transport_cleaned_on_handshake_failure() {
         let (mut stream, _) = listener2.accept().expect("Failed to accept connection");
 
         loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let packet = match try_read_request(&mut stream) {
+                Some(p) => p,
+                None => break,
+            };
 
             match packet.command() {
                 CMD_CONNECT => {
                     let res = ZKPacket::new(CMD_ACK_OK, 5555, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
+                    send_response(&mut stream, &res);
                 }
                 CMD_EXIT => {
                     let res = ZKPacket::new(CMD_ACK_OK, 5555, packet.reply_id(), vec![]);
@@ -113,26 +101,13 @@ fn test_restart_resets_state_on_error() {
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
 
-        loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
-
-            if packet.command() == CMD_CONNECT {
-                let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
-                stream
-                    .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                    .unwrap();
-                // Signal that connect is done, then close the stream
-                // to simulate device becoming unreachable
-                tx.send(()).unwrap();
-                break;
-            }
+        let packet = read_request(&mut stream);
+        if packet.command() == CMD_CONNECT {
+            let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
+            send_response(&mut stream, &res);
+            // Signal that connect is done, then close the stream
+            // to simulate device becoming unreachable
+            tx.send(()).unwrap();
         }
         // stream drops here — device is now "unreachable"
     });
@@ -169,24 +144,11 @@ fn test_poweroff_resets_state_on_error() {
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
 
-        loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
-
-            if packet.command() == CMD_CONNECT {
-                let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
-                stream
-                    .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                    .unwrap();
-                tx.send(()).unwrap();
-                break;
-            }
+        let packet = read_request(&mut stream);
+        if packet.command() == CMD_CONNECT {
+            let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
+            send_response(&mut stream, &res);
+            tx.send(()).unwrap();
         }
     });
 
@@ -240,29 +202,21 @@ fn test_auth_failure_resets_session_id() {
         let (mut stream, _) = listener.accept().expect("Failed to accept");
 
         loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
+            let packet = match try_read_request(&mut stream) {
+                Some(p) => p,
+                None => break,
+            };
 
             match packet.command() {
                 CMD_CONNECT => {
                     // Respond with CMD_ACK_UNAUTH (password required)
                     let res = ZKPacket::new(CMD_ACK_UNAUTH, 9999, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
+                    send_response(&mut stream, &res);
                 }
                 CMD_AUTH => {
                     // Respond with CMD_ACK_UNAUTH (wrong password)
                     let res = ZKPacket::new(CMD_ACK_UNAUTH, 9999, packet.reply_id(), vec![]);
-                    stream
-                        .write_all(&TCPWrapper::wrap(&res.to_bytes()))
-                        .unwrap();
+                    send_response(&mut stream, &res);
                 }
                 _ => break,
             }
@@ -294,16 +248,10 @@ fn test_auto_fallback_preserves_checksum_flag() {
     thread::spawn(move || {
         // Accept connection but send invalid response to make handshake fail
         if let Ok((mut stream, _)) = listener.accept() {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_ok() {
-                let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-                let mut body = vec![0u8; length];
-                let _ = stream.read_exact(&mut body);
-                if let Ok(packet) = ZKPacket::from_bytes(&body) {
-                    // Send an error response
-                    let res = ZKPacket::new(CMD_ACK_ERROR, 0, packet.reply_id(), vec![]);
-                    let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
-                }
+            if let Some(packet) = try_read_request(&mut stream) {
+                // Send an error response
+                let res = ZKPacket::new(CMD_ACK_ERROR, 0, packet.reply_id(), vec![]);
+                send_response(&mut stream, &res);
             }
         }
     });
@@ -367,15 +315,9 @@ fn test_zk_is_alive_timeout_handling() {
         let (mut stream, _) = listener.accept().expect("Failed to accept");
 
         // Handle connect
-        let mut header = [0u8; 8];
-        if stream.read_exact(&mut header).is_ok() {
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            let _ = stream.read_exact(&mut body);
-            let packet = ZKPacket::from_bytes(&body).unwrap();
-            let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
-            let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
-        }
+        let packet = read_request(&mut stream);
+        let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
+        send_response(&mut stream, &res);
 
         // For subsequent requests (like CMD_GET_TIME in is_alive), we just do nothing
         // to simulate a silent/hung connection
@@ -412,15 +354,9 @@ fn test_tcp_framing_deserialization_recovery() {
         let (mut stream, _) = listener.accept().expect("Failed to accept");
 
         // Handle connect
-        let mut header = [0u8; 8];
-        if stream.read_exact(&mut header).is_ok() {
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            let _ = stream.read_exact(&mut body);
-            let packet = ZKPacket::from_bytes(&body).unwrap();
-            let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
-            let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
-        }
+        let packet = read_request(&mut stream);
+        let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
+        send_response(&mut stream, &res);
 
         // Send corrupt header magic bytes back for the next command
         // Wrong magic: [0x00, 0x00, 0x00, 0x00]
@@ -448,15 +384,9 @@ fn test_zk_drop_non_blocking() {
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept");
         // Handle connect
-        let mut header = [0u8; 8];
-        if stream.read_exact(&mut header).is_ok() {
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            let _ = stream.read_exact(&mut body);
-            let packet = ZKPacket::from_bytes(&body).unwrap();
-            let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
-            let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
-        }
+        let packet = read_request(&mut stream);
+        let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
+        send_response(&mut stream, &res);
         // Sleep to simulate unreachable connection during drop
         thread::sleep(Duration::from_secs(5));
     });

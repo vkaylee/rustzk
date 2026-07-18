@@ -149,10 +149,12 @@ impl ZK {
             let naive = ZK::decode_time(res.payload())?;
             let offset = FixedOffset::east_opt(self.timezone_offset * 60)
                 .or_else(|| FixedOffset::east_opt(0))
-                .ok_or_else(|| ZKError::InvalidData(
-                    ZKErrorCode::InvalidDataFormat,
-                    "Failed to construct timezone offset".into(),
-                ))?;
+                .ok_or_else(|| {
+                    ZKError::InvalidData(
+                        ZKErrorCode::InvalidDataFormat,
+                        "Failed to construct timezone offset".into(),
+                    )
+                })?;
 
             match offset.from_local_datetime(&naive) {
                 chrono::LocalResult::Single(dt) => Ok(dt),

@@ -1,6 +1,6 @@
 mod common;
-use common::{make_prepare_data_payload, MockZKServer};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use common::{make_prepare_data_payload, MockZKServer};
 use rustzk::constants::*;
 use rustzk::models::User;
 use rustzk::{ZKProtocol, ZK};
@@ -35,8 +35,13 @@ fn test_set_user_mock() {
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let user = User::new(
-        1, "Test User".to_string(), USER_ADMIN, "123".to_string(),
-        "1".to_string(), "101".to_string(), 0,
+        1,
+        "Test User".to_string(),
+        USER_ADMIN,
+        "123".to_string(),
+        "1".to_string(),
+        "101".to_string(),
+        0,
     );
     let result = zk.set_user(&user);
     assert!(result.is_ok());
@@ -81,8 +86,13 @@ fn test_set_user_conflict_mock() {
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let user = User::new(
-        11, "Cloned User".to_string(), USER_DEFAULT, "".to_string(),
-        "1".to_string(), "101".to_string(), 0,
+        11,
+        "Cloned User".to_string(),
+        USER_DEFAULT,
+        "".to_string(),
+        "1".to_string(),
+        "101".to_string(),
+        0,
     );
     let result = zk.set_user(&user);
     assert!(result.is_err());
@@ -158,7 +168,10 @@ fn test_find_user_by_id_mock() {
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
 
-    let user = zk.find_user_by_id("12345").unwrap().expect("User should be found");
+    let user = zk
+        .find_user_by_id("12345")
+        .unwrap()
+        .expect("User should be found");
     assert_eq!(user.uid(), 1);
     assert_eq!(user.user_id(), "12345");
 
@@ -217,15 +230,47 @@ fn test_set_users_bulk_mock() {
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let users = vec![
-        User::new(1, "User 1".into(), USER_DEFAULT, "".into(), "1".into(), "101".into(), 0),
-        User::new(2, "User 2".into(), USER_DEFAULT, "".into(), "1".into(), "102".into(), 0),
+        User::new(
+            1,
+            "User 1".into(),
+            USER_DEFAULT,
+            "".into(),
+            "1".into(),
+            "101".into(),
+            0,
+        ),
+        User::new(
+            2,
+            "User 2".into(),
+            USER_DEFAULT,
+            "".into(),
+            "1".into(),
+            "102".into(),
+            0,
+        ),
     ];
     let result = zk.set_users_bulk(&users);
     assert!(result.is_ok());
 
     let conflict_batch = vec![
-        User::new(3, "User 3".into(), USER_DEFAULT, "".into(), "1".into(), "103".into(), 0),
-        User::new(4, "User 4".into(), USER_DEFAULT, "".into(), "1".into(), "103".into(), 0),
+        User::new(
+            3,
+            "User 3".into(),
+            USER_DEFAULT,
+            "".into(),
+            "1".into(),
+            "103".into(),
+            0,
+        ),
+        User::new(
+            4,
+            "User 4".into(),
+            USER_DEFAULT,
+            "".into(),
+            "1".into(),
+            "103".into(),
+            0,
+        ),
     ];
     let result = zk.set_users_bulk(&conflict_batch);
     assert!(result.is_err());
@@ -267,17 +312,20 @@ fn test_user_id_cache_invalidation_and_timezone_redundancy() {
             get_option_count_clone.fetch_add(1, Ordering::SeqCst);
             Some((CMD_ACK_UNAUTH, vec![]))
         })
-        .on(CMD_GET_TIME, |_rid, _| {
-            Some((CMD_ACK_OK, vec![0, 0, 0, 0]))
-        })
+        .on(CMD_GET_TIME, |_rid, _| Some((CMD_ACK_OK, vec![0, 0, 0, 0])))
         .spawn();
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
 
     let user = User::new(
-        1, "User 1".into(), USER_DEFAULT, "".into(),
-        "1".into(), "101".into(), 0,
+        1,
+        "User 1".into(),
+        USER_DEFAULT,
+        "".into(),
+        "1".into(),
+        "101".into(),
+        0,
     );
     zk.set_user(&user).unwrap();
     assert!(zk.is_connected());

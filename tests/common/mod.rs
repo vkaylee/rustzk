@@ -73,9 +73,10 @@ impl MockZKServer {
 
     /// Shorthand: respond with `CMD_ACK_OK` + given payload for a command.
     pub fn on_ack(mut self, cmd: u16, payload: Vec<u8>) -> Self {
-        self.handlers.push((cmd, Box::new(move |_rid, _p| {
-            Some((CMD_ACK_OK, payload.clone()))
-        })));
+        self.handlers.push((
+            cmd,
+            Box::new(move |_rid, _p| Some((CMD_ACK_OK, payload.clone()))),
+        ));
         self
     }
 
@@ -245,7 +246,9 @@ pub fn make_prepare_data_payload(size: u32) -> Vec<u8> {
     use byteorder::{LittleEndian, WriteBytesExt};
     let mut payload = vec![0u8; 5];
     payload[0] = 1;
-    (&mut payload[1..5]).write_u32::<LittleEndian>(size).unwrap();
+    (&mut payload[1..5])
+        .write_u32::<LittleEndian>(size)
+        .unwrap();
     payload
 }
 
@@ -264,4 +267,34 @@ pub fn make_prepare_data_payload(size: u32) -> Vec<u8> {
 /// ```
 pub fn with_state<T: Send + 'static>(init: T) -> Arc<Mutex<T>> {
     Arc::new(Mutex::new(init))
+}
+
+// ── Lightweight helpers for inline mock servers ──────────────────────────
+
+/// Read one TCP-framed ZK request from the client stream.
+/// Panics on I/O or decode errors (acceptable in test code).
+pub fn read_request(stream: &mut TcpStream) -> ZKPacket<'static> {
+    let mut header = [0u8; 8];
+    stream.read_exact(&mut header).unwrap();
+    let (length, _) = TCPWrapper::decode_header(&header).unwrap();
+    let mut body = vec![0u8; length];
+    stream.read_exact(&mut body).unwrap();
+    ZKPacket::from_bytes_owned(body).unwrap()
+}
+
+/// Read one TCP-framed ZK request, returning `None` on clean EOF / error.
+pub fn try_read_request(stream: &mut TcpStream) -> Option<ZKPacket<'static>> {
+    let mut header = [0u8; 8];
+    stream.read_exact(&mut header).ok()?;
+    let (length, _) = TCPWrapper::decode_header(&header).ok()?;
+    let mut body = vec![0u8; length];
+    stream.read_exact(&mut body).ok()?;
+    ZKPacket::from_bytes_owned(body).ok()
+}
+
+/// Send a TCP-framed ZK response to the client stream.
+pub fn send_response(stream: &mut TcpStream, packet: &ZKPacket) {
+    stream
+        .write_all(&TCPWrapper::wrap(&packet.to_bytes()))
+        .unwrap();
 }

@@ -150,7 +150,10 @@ impl ZK {
     pub fn set_user_unchecked(&mut self, user: &User) -> ZKResult<()> {
         self.set_user_unchecked_no_refresh(user)?;
         if let Err(e) = self.refresh_data() {
-            log::warn!("Failed to refresh device data after set_user_unchecked: {}", e);
+            log::warn!(
+                "Failed to refresh device data after set_user_unchecked: {}",
+                e
+            );
         }
         Ok(())
     }
@@ -289,7 +292,10 @@ impl ZK {
         let res = self.send_command(CMD_DELETE_USERTEMP, &payload)?;
         if res.command() == CMD_ACK_OK {
             if let Err(e) = self.refresh_data() {
-                log::warn!("Failed to refresh device data after delete_user_template: {}", e);
+                log::warn!(
+                    "Failed to refresh device data after delete_user_template: {}",
+                    e
+                );
             }
             Ok(())
         } else {

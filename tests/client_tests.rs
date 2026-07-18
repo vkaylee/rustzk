@@ -6,9 +6,9 @@
 )]
 
 mod common;
-use common::MockZKServer;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use chrono::{Datelike, TimeZone};
+use common::MockZKServer;
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::{ZKProtocol, ZK};
@@ -1234,9 +1234,7 @@ fn test_set_time_mock() {
 fn test_zk_is_alive_connected() {
     let (server, port) = MockZKServer::new()
         .with_session(9988)
-        .on(CMD_GET_TIME, |_rid, _| {
-            Some((CMD_ACK_OK, vec![0u8; 4]))
-        })
+        .on(CMD_GET_TIME, |_rid, _| Some((CMD_ACK_OK, vec![0u8; 4])))
         .spawn();
 
     let mut zk = ZK::new("127.0.0.1", port);

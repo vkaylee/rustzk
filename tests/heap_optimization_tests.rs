@@ -1,27 +1,12 @@
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use rustzk::constants::*;
-use rustzk::protocol::{TCPWrapper, ZKPacket};
+use rustzk::protocol::ZKPacket;
 use rustzk::{ZKProtocol, ZK};
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::thread;
 
-/// Helper: read one TCP request from client
-fn read_request(stream: &mut TcpStream) -> ZKPacket<'static> {
-    let mut header = [0u8; 8];
-    stream.read_exact(&mut header).unwrap();
-    let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-    let mut body = vec![0u8; length];
-    stream.read_exact(&mut body).unwrap();
-    ZKPacket::from_bytes_owned(body).unwrap()
-}
-
-/// Helper: send a TCP response
-fn send_response(stream: &mut TcpStream, packet: &ZKPacket) {
-    stream
-        .write_all(&TCPWrapper::wrap(&packet.to_bytes()))
-        .unwrap();
-}
+mod common;
+use common::{read_request, send_response};
 
 /// Verifies send_command works with &[] (empty slice) for commands with no payload.
 /// Uses a loop-based server to handle sync_timezone calls from read_sizes().

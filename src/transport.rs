@@ -282,6 +282,34 @@ impl ZK {
         }
     }
 
+    /// Send a ZKPacket over the current transport.
+    /// Handles TCP framing (magic + length prefix) and UDP direct send uniformly.
+    pub(crate) fn send_packet(&mut self, packet: &ZKPacket<'_>) -> ZKResult<()> {
+        let transport = self.transport.as_mut().ok_or_else(|| {
+            ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
+        })?;
+
+        match transport {
+            ZKTransport::Tcp(ref mut reader) => {
+                self.write_buf.clear();
+                self.write_buf
+                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
+                self.write_buf
+                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
+                self.write_buf
+                    .write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
+                packet.to_bytes_into(&mut self.write_buf)?;
+                reader.get_mut().write_all(&self.write_buf)?;
+            }
+            ZKTransport::Udp(ref mut socket) => {
+                self.write_buf.clear();
+                packet.to_bytes_into(&mut self.write_buf)?;
+                socket.send(&self.write_buf)?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn send_command(
         &mut self,
         command: u16,
@@ -312,28 +340,7 @@ impl ZK {
             ZKPacket::new(command, self.session_id, self.reply_id, payload)
         };
 
-        let transport = self.transport.as_mut().ok_or_else(|| {
-            ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
-        })?;
-
-        match transport {
-            ZKTransport::Tcp(ref mut reader) => {
-                self.write_buf.clear();
-                self.write_buf
-                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
-                self.write_buf
-                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
-                self.write_buf
-                    .write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
-                packet.to_bytes_into(&mut self.write_buf)?;
-                reader.get_mut().write_all(&self.write_buf)?;
-            }
-            ZKTransport::Udp(ref mut socket) => {
-                self.write_buf.clear();
-                packet.to_bytes_into(&mut self.write_buf)?;
-                socket.send(&self.write_buf)?;
-            }
-        }
+        self.send_packet(&packet)?;
 
         self.read_response_safe()
     }
@@ -613,8 +620,8 @@ impl ZK {
         }
     }
 
-    pub(crate) fn send_exit_packet(&mut self) -> std::io::Result<()> {
-        if let Some(ref mut transport) = self.transport {
+    pub(crate) fn send_exit_packet(&mut self) -> ZKResult<()> {
+        if self.transport.is_some() {
             self.reply_id = self.reply_id.wrapping_add(1);
             if self.reply_id == USHRT_MAX {
                 self.reply_id -= USHRT_MAX;
@@ -626,24 +633,7 @@ impl ZK {
                 ZKPacket::new(CMD_EXIT, self.session_id, self.reply_id, &[])
             };
 
-            match transport {
-                ZKTransport::Tcp(ref mut reader) => {
-                    self.write_buf.clear();
-                    self.write_buf
-                        .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
-                    self.write_buf
-                        .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
-                    self.write_buf
-                        .write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
-                    packet.to_bytes_into(&mut self.write_buf)?;
-                    reader.get_mut().write_all(&self.write_buf)?;
-                }
-                ZKTransport::Udp(ref mut socket) => {
-                    self.write_buf.clear();
-                    packet.to_bytes_into(&mut self.write_buf)?;
-                    socket.send(&self.write_buf)?;
-                }
-            }
+            self.send_packet(&packet)?;
         }
         Ok(())
     }

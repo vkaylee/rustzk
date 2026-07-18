@@ -1,6 +1,6 @@
 mod common;
-use common::{make_prepare_data_payload, MockZKServer};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use common::{make_prepare_data_payload, MockZKServer};
 use rustzk::constants::*;
 use rustzk::{ZKProtocol, ZK};
 use std::io::Write;
@@ -26,8 +26,8 @@ fn test_get_templates_mock() {
             data.write_i32::<LittleEndian>(12).unwrap();
             data.write_u16::<LittleEndian>(12).unwrap();
             data.write_u16::<LittleEndian>(1).unwrap();
-            data.write_u8(0).unwrap();  // fid
-            data.write_u8(1).unwrap();  // valid
+            data.write_u8(0).unwrap(); // fid
+            data.write_u8(1).unwrap(); // valid
             data.write_all(&[0xAA; 6]).unwrap();
             Some((CMD_DATA, data))
         })
