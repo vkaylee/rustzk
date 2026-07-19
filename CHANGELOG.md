@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-07-19
+### Added
+- **Fingerprint Template Upload**: New `ZK::save_user_template(user, fingers)` uploads fingerprint templates to the device, completing the write side of template management (previously only read/delete were supported). Backed by a new `send_with_buffer` transport path (`CMD_PREPARE_DATA` → chunked `CMD_DATA` → `_CMD_SAVE_USERTEMPS` commit) and a `Finger::repack_only()` serializer.
+- **Tests**: Added mock-server integration tests covering single-finger, multi-finger offset accumulation, and empty-slice short-circuit, plus `Finger::repack_only` unit tests.
+
 ## [1.0.2] - 2026-06-22
 ### Fixed
 - **Attendance Record Size Validation**: Enforced strict record size validation (8, 16, 40 bytes) in `attendance.rs`.
