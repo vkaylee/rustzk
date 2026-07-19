@@ -31,23 +31,23 @@ impl ZK {
         if total_size == 0 {
             return Ok(Vec::new());
         }
-        self.user_packet_size = total_size / self.users() as usize;
+        self.config.user_packet_size = total_size / self.users() as usize;
         let data = &userdata[4..];
 
         let mut users = Vec::with_capacity(std::cmp::min(
             self.users() as usize,
-            data.len() / self.user_packet_size,
+            data.len() / self.config.user_packet_size,
         ));
         let mut offset = 0;
 
-        if self.user_packet_size == USER_PACKET_SIZE_SMALL {
+        if self.config.user_packet_size == USER_PACKET_SIZE_SMALL {
             while offset + USER_PACKET_SIZE_SMALL <= data.len() {
                 let chunk = &data[offset..offset + USER_PACKET_SIZE_SMALL];
                 let user = User::parse_small(chunk)?;
                 users.push(user);
                 offset += USER_PACKET_SIZE_SMALL;
             }
-        } else if self.user_packet_size == USER_PACKET_SIZE_LARGE {
+        } else if self.config.user_packet_size == USER_PACKET_SIZE_LARGE {
             while offset + USER_PACKET_SIZE_LARGE <= data.len() {
                 let chunk = &data[offset..offset + USER_PACKET_SIZE_LARGE];
                 let user = User::parse_large(chunk)?;
@@ -59,7 +59,7 @@ impl ZK {
                 ZKErrorCode::ProtocolViolation,
                 format!(
                     "Unsupported user packet size: {}. Device might be using an unknown protocol version.",
-                    self.user_packet_size
+                    self.config.user_packet_size
                 ),
             ));
         }
@@ -160,7 +160,7 @@ impl ZK {
 
     /// Internal helper to set a user without sending a REFRESHDATA command.
     fn set_user_unchecked_no_refresh(&mut self, user: &User) -> ZKResult<()> {
-        let payload = if self.user_packet_size == USER_PACKET_SIZE_SMALL {
+        let payload = if self.config.user_packet_size == USER_PACKET_SIZE_SMALL {
             user.to_bytes_small()?
         } else {
             user.to_bytes_large()?

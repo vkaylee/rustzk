@@ -6,6 +6,7 @@
 pub mod constants;
 pub use crate::constants::*;
 pub mod attendance;
+pub mod connection;
 pub mod device;
 pub mod models;
 pub mod protocol;
@@ -13,6 +14,7 @@ pub mod security;
 pub mod transport;
 pub mod user;
 
+use crate::connection::{ZKConfig, ZKConnection};
 use byteorder::ReadBytesExt;
 use chrono::{Datelike, Timelike};
 use std::io;
@@ -81,51 +83,29 @@ pub enum ZKProtocol {
 }
 
 pub struct ZK {
-    addr: String,
-    transport: Option<ZKTransport>,
-    session_id: u16,
-    reply_id: u16,
-    timeout: Duration,
-    is_connected: bool,
+    config: ZKConfig,
+    connection: ZKConnection,
     user_id_cache: Option<std::collections::HashMap<u16, String>>,
-    user_packet_size: usize,
     device_info: Option<models::DeviceInfo>,
-    encoding: &'static str,
-    password: u32,
     timezone_offset: i32, // Offset in minutes
     timezone_synced: bool,
-    use_legacy_checksum: bool,
-    /// Reusable buffer for UDP reads to avoid per-packet heap allocation.
-    udp_buf: Vec<u8>,
-    /// Reusable buffer for packet serialization to avoid heap allocations on write.
-    write_buf: Vec<u8>,
 }
 
 impl ZK {
     pub fn new(addr: &str, port: u16) -> Self {
         ZK {
-            addr: format!("{}:{}", addr, port),
-            transport: None,
-            session_id: 0,
-            reply_id: USHRT_MAX - 1,
-            timeout: Duration::from_secs(60),
-            is_connected: false,
+            config: ZKConfig::new(),
+            connection: ZKConnection::new(format!("{}:{}", addr, port)),
             user_id_cache: None,
-            user_packet_size: 28,
             device_info: None,
-            encoding: "UTF-8",
-            udp_buf: vec![0u8; 2048],
-            write_buf: Vec::with_capacity(1024),
-            password: 0,
             timezone_offset: 0,
             timezone_synced: false,
-            use_legacy_checksum: false,
         }
     }
 
     /// Sets the communication password for the device.
     pub fn set_password(&mut self, password: u32) {
-        self.password = password;
+        self.config.password = password;
     }
 
     /// Forces use of the legacy checksum algorithm (Rust bitwise NOT).
@@ -134,42 +114,42 @@ impl ZK {
     /// falls back to legacy on timeout. Call this before [`connect`](Self::connect)
     /// to skip the auto-detection and connect immediately with legacy checksum.
     pub fn set_legacy_checksum(&mut self, legacy: bool) {
-        self.use_legacy_checksum = legacy;
+        self.connection.use_legacy_checksum = legacy;
     }
 
     /// Returns the device address.
     pub fn addr(&self) -> &str {
-        &self.addr
+        &self.connection.addr
     }
 
     /// Sets the device address.
     pub fn set_addr(&mut self, addr: String) {
-        self.addr = addr;
+        self.connection.addr = addr;
     }
 
     /// Returns the read/write timeout.
     pub fn timeout(&self) -> Duration {
-        self.timeout
+        self.config.timeout
     }
 
     /// Sets the read/write timeout.
     pub fn set_timeout(&mut self, timeout: Duration) {
-        self.timeout = timeout;
+        self.config.timeout = timeout;
     }
 
     /// Returns the user packet size.
     pub fn user_packet_size(&self) -> usize {
-        self.user_packet_size
+        self.config.user_packet_size
     }
 
     /// Sets the user packet size.
     pub fn set_user_packet_size(&mut self, size: usize) {
-        self.user_packet_size = size;
+        self.config.user_packet_size = size;
     }
 
     /// Returns the string encoding used for decoding display names.
     pub fn encoding(&self) -> &'static str {
-        self.encoding
+        self.config.encoding
     }
 
     /// Internal helper to generate the authentication communication key.
@@ -204,10 +184,10 @@ impl ZK {
     /// Returns `true` if the device responds successfully, and `false` otherwise.
     /// If the connection has died, `is_connected` is automatically set to `false`.
     pub fn is_alive(&mut self) -> bool {
-        if !self.is_connected {
+        if !self.connection.is_connected {
             return false;
         }
-        let saved_timeout = self.timeout;
+        let saved_timeout = self.config.timeout;
         self.set_transport_read_timeout(Duration::from_secs(2));
         let res = self.send_command(CMD_GET_TIME, &[]);
         self.set_transport_read_timeout(saved_timeout);
@@ -215,21 +195,21 @@ impl ZK {
         match res {
             Ok(packet) => packet.command() == CMD_ACK_OK || packet.command() == CMD_ACK_DATA,
             Err(_) => {
-                self.is_connected = false;
-                self.transport = None;
+                self.connection.is_connected = false;
+                self.connection.transport = None;
                 false
             }
         }
     }
 
     pub fn session_id(&self) -> u16 {
-        self.session_id
+        self.connection.session_id
     }
     pub fn reply_id(&self) -> u16 {
-        self.reply_id
+        self.connection.reply_id
     }
     pub fn use_legacy_checksum(&self) -> bool {
-        self.use_legacy_checksum
+        self.connection.use_legacy_checksum
     }
 
     /// Decodes a GBK-encoded byte slice into a String.
@@ -311,11 +291,11 @@ impl ZK {
 
 impl Drop for ZK {
     fn drop(&mut self) {
-        if self.is_connected {
+        if self.connection.is_connected {
             let _ = self.send_exit_packet();
-            self.is_connected = false;
+            self.connection.is_connected = false;
         }
-        self.transport = None;
+        self.connection.transport = None;
     }
 }
 
@@ -376,14 +356,14 @@ mod tests {
     #[test]
     fn test_zk_new_default_password() {
         let zk = ZK::new("192.168.1.201", 4370);
-        assert_eq!(zk.password, 0);
+        assert_eq!(zk.config.password, 0);
     }
 
     #[test]
     fn test_zk_set_password() {
         let mut zk = ZK::new("192.168.1.201", 4370);
         zk.set_password(12345);
-        assert_eq!(zk.password, 12345);
+        assert_eq!(zk.config.password, 12345);
     }
 
     #[test]

@@ -2,10 +2,11 @@ use crate::constants::{USER_PACKET_SIZE_LARGE, USER_PACKET_SIZE_SMALL};
 use crate::{ZKError, ZKResult};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
+use std::fmt;
 use std::io::{Cursor, Read, Write};
 
 /// Represents an attendance record (clock-in/out).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attendance {
     /// Internal record UID (sequence number).
     uid: u32,
@@ -109,8 +110,22 @@ impl Attendance {
     }
 }
 
+impl fmt::Display for Attendance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Attendance {{ uid: {}, user_id: {}, timestamp: {}, status: {}, punch: {} }}",
+            self.uid,
+            self.user_id,
+            self.iso_format(),
+            self.status,
+            self.punch,
+        )
+    }
+}
+
 /// Represents a user on the ZK device.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
     /// Internal user UID.
     uid: u16,
@@ -223,6 +238,16 @@ impl User {
     /// Serializes the user into a 72-byte raw vector.
     pub fn to_bytes_large(&self) -> ZKResult<Vec<u8>> {
         user_to_bytes::<LargeLayout>(self)
+    }
+}
+
+impl fmt::Display for User {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "User {{ uid: {}, user_id: {}, name: {}, privilege: {}, group: {} }}",
+            self.uid, self.user_id, self.name, self.privilege, self.group_id
+        )
     }
 }
 
@@ -389,21 +414,35 @@ fn user_to_bytes<L: UserPacketLayout>(user: &User) -> ZKResult<Vec<u8>> {
 }
 
 /// Device capacity and usage statistics populated by [`ZK::read_sizes`].
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DeviceInfo {
     pub users: u32,
     pub fingers: u32,
     pub records: u32,
-    pub cards: i32,
+    pub cards: u32,
     pub faces: u32,
-    pub fingers_cap: i32,
-    pub users_cap: i32,
-    pub rec_cap: i32,
-    pub faces_cap: i32,
+    pub fingers_cap: u32,
+    pub users_cap: u32,
+    pub rec_cap: u32,
+    pub faces_cap: u32,
+}
+
+impl fmt::Display for DeviceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "DeviceInfo {{ users: {}/{}, fingers: {}/{}, records: {}/{}, cards: {}, faces: {}/{} }}",
+            self.users, self.users_cap,
+            self.fingers, self.fingers_cap,
+            self.records, self.rec_cap,
+            self.cards,
+            self.faces, self.faces_cap,
+        )
+    }
 }
 
 /// Represents a fingerprint template.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finger {
     /// UID of the user this finger belongs to.
     uid: u16,
@@ -444,6 +483,16 @@ impl Finger {
     /// Getter for template.
     pub fn template(&self) -> &[u8] {
         &self.template
+    }
+}
+
+impl fmt::Display for Finger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Finger {{ uid: {}, fid: {}, valid: {}, template_size: {} }}",
+            self.uid, self.fid, self.valid, self.template.len()
+        )
     }
 }
 
@@ -613,5 +662,126 @@ mod tests {
         assert_eq!(user.name(), "Updated");
         assert_eq!(user.password(), "pass");
         assert_eq!(user.group_id(), "grp");
+    }
+
+    // ── PartialEq + Display tests ───────────────────────────────────────
+
+    #[test]
+    fn test_device_info_eq_and_display() {
+        let a = DeviceInfo {
+            users: 10,
+            fingers: 20,
+            records: 100,
+            cards: 5,
+            faces: 3,
+            fingers_cap: 500,
+            users_cap: 200,
+            rec_cap: 5000,
+            faces_cap: 100,
+        };
+        let b = DeviceInfo {
+            users: 10,
+            fingers: 20,
+            records: 100,
+            cards: 5,
+            faces: 3,
+            fingers_cap: 500,
+            users_cap: 200,
+            rec_cap: 5000,
+            faces_cap: 100,
+        };
+        assert_eq!(a, b);
+
+        let display = format!("{}", a);
+        assert!(display.contains("users: 10/200"));
+        assert!(display.contains("fingers: 20/500"));
+        assert!(display.contains("records: 100/5000"));
+        assert!(display.contains("cards: 5"));
+        assert!(display.contains("faces: 3/100"));
+    }
+
+    #[test]
+    fn test_device_info_not_eq() {
+        let a = DeviceInfo {
+            users: 10,
+            ..DeviceInfo::default()
+        };
+        let b = DeviceInfo {
+            users: 5,
+            ..DeviceInfo::default()
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_user_eq_and_display() {
+        let a = User::new(1, "Alice".into(), 14, "123".into(), "1".into(), "101".into(), 0);
+        let b = User::new(1, "Alice".into(), 14, "123".into(), "1".into(), "101".into(), 0);
+        assert_eq!(a, b);
+
+        let display = format!("{}", a);
+        assert!(display.contains("uid: 1"));
+        assert!(display.contains("user_id: 101"));
+        assert!(display.contains("name: Alice"));
+        assert!(display.contains("privilege: 14"));
+        assert!(display.contains("group: 1"));
+    }
+
+    #[test]
+    fn test_user_not_eq_different_name() {
+        let a = User::new(1, "Alice".into(), 0, "".into(), "1".into(), "1".into(), 0);
+        let b = User::new(1, "Bob".into(), 0, "".into(), "1".into(), "1".into(), 0);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_attendance_eq_and_display() {
+        let naive =
+            chrono::NaiveDate::from_ymd_opt(2026, 2, 19)
+                .unwrap()
+                .and_hms_opt(9, 16, 41)
+                .unwrap();
+        let a = Attendance::new(1, "101".into(), naive, 1, 3, 420);
+        let b = Attendance::new(1, "101".into(), naive, 1, 3, 420);
+        assert_eq!(a, b);
+
+        let display = format!("{}", a);
+        assert!(display.contains("uid: 1"));
+        assert!(display.contains("user_id: 101"));
+        assert!(display.contains("2026-02-19T09:16:41+07:00"));
+        assert!(display.contains("status: 1"));
+        assert!(display.contains("punch: 3"));
+    }
+
+    #[test]
+    fn test_attendance_not_eq_different_status() {
+        let naive =
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap();
+        let a = Attendance::new(1, "1".into(), naive, 1, 0, 0);
+        let b = Attendance::new(1, "1".into(), naive, 2, 0, 0);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_finger_eq_and_display() {
+        let a = Finger::new(5, 2, 1, vec![0xAA, 0xBB]);
+        let b = Finger::new(5, 2, 1, vec![0xAA, 0xBB]);
+        assert_eq!(a, b);
+
+        let display = format!("{}", a);
+        assert!(display.contains("uid: 5"));
+        assert!(display.contains("fid: 2"));
+        assert!(display.contains("valid: 1"));
+        assert!(display.contains("template_size: 2"));
+    }
+
+    #[test]
+    fn test_finger_not_eq_different_template() {
+        let a = Finger::new(1, 0, 1, vec![0xAA]);
+        let b = Finger::new(1, 0, 1, vec![0xBB]);
+        assert_ne!(a, b);
     }
 }

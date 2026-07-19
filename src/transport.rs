@@ -14,7 +14,7 @@ pub enum ZKTransport {
 
 impl ZK {
     pub(crate) fn set_transport_read_timeout(&mut self, timeout: Duration) {
-        if let Some(ref mut transport) = self.transport {
+        if let Some(ref mut transport) = self.connection.transport {
             match transport {
                 ZKTransport::Tcp(reader) => {
                     let _ = reader.get_ref().set_read_timeout(Some(timeout));
@@ -27,15 +27,15 @@ impl ZK {
     }
 
     pub(crate) fn perform_connect_handshake(&mut self) -> ZKResult<()> {
-        self.session_id = 0;
-        self.reply_id = USHRT_MAX - 1;
+        self.connection.session_id = 0;
+        self.connection.reply_id = USHRT_MAX - 1;
         self.timezone_synced = false;
         self.timezone_offset = 0;
 
         // Use a short timeout for handshake probes (5s each) so auto-fallback
         // completes in ~10s max instead of waiting the full user-configured timeout.
         let handshake_timeout = Duration::from_secs(5);
-        let saved_timeout = self.timeout;
+        let saved_timeout = self.config.timeout;
         self.set_transport_read_timeout(handshake_timeout);
 
         // Attempt 1: Try current checksum algorithm
@@ -55,20 +55,20 @@ impl ZK {
                 // Flip to the alternative checksum algorithm and retry.
                 log::info!(
                     "Handshake timeout with {} checksum. Retrying with {} checksum...",
-                    if self.use_legacy_checksum {
+                    if self.connection.use_legacy_checksum {
                         "legacy"
                     } else {
                         "default"
                     },
-                    if self.use_legacy_checksum {
+                    if self.connection.use_legacy_checksum {
                         "default"
                     } else {
                         "legacy"
                     }
                 );
-                self.use_legacy_checksum = !self.use_legacy_checksum;
-                self.session_id = 0;
-                self.reply_id = USHRT_MAX - 1;
+                self.connection.use_legacy_checksum = !self.connection.use_legacy_checksum;
+                self.connection.session_id = 0;
+                self.connection.reply_id = USHRT_MAX - 1;
 
                 // Attempt 2: Try alternative checksum algorithm
                 let result = self.send_command(CMD_CONNECT, &[]);
@@ -80,7 +80,7 @@ impl ZK {
                     Ok(res) => {
                         log::info!(
                             "Connected with {} checksum",
-                            if self.use_legacy_checksum {
+                            if self.connection.use_legacy_checksum {
                                 "legacy"
                             } else {
                                 "default"
@@ -101,27 +101,27 @@ impl ZK {
     pub(crate) fn finish_handshake(&mut self, res: ZKPacket<'static>) -> ZKResult<()> {
         // Update session_id if we got a valid response (OK or UNAUTH)
         if res.command() == CMD_ACK_OK || res.command() == CMD_ACK_UNAUTH {
-            self.session_id = res.session_id();
+            self.connection.session_id = res.session_id();
         }
 
         if res.command() == CMD_ACK_UNAUTH {
             // Need authentication
-            let command_string = ZK::make_commkey(self.password, self.session_id, 50);
+            let command_string = ZK::make_commkey(self.config.password, self.connection.session_id, 50);
             let auth_res = self.send_command(CMD_AUTH, &command_string)?;
             if auth_res.command() == CMD_ACK_UNAUTH {
-                self.session_id = 0; // Reset dirty session_id on auth failure
+                self.connection.session_id = 0; // Reset dirty session_id on auth failure
                 return Err(ZKError::Connection(
                     ZKErrorCode::Unauthorized,
                     "Unauthorized: Password required or incorrect".into(),
                 ));
             }
-            self.session_id = auth_res.session_id();
-            self.is_connected = true;
+            self.connection.session_id = auth_res.session_id();
+            self.connection.is_connected = true;
             return Ok(());
         }
 
         if res.command() == CMD_ACK_OK {
-            self.is_connected = true;
+            self.connection.is_connected = true;
             Ok(())
         } else {
             Err(ZKError::Connection(
@@ -151,7 +151,7 @@ impl ZK {
     }
 
     pub(crate) fn read_packet(&mut self) -> ZKResult<ZKPacket<'static>> {
-        let transport = self.transport.as_mut().ok_or_else(|| {
+        let transport = self.connection.transport.as_mut().ok_or_else(|| {
             ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
         })?;
 
@@ -164,23 +164,23 @@ impl ZK {
                             "TCP stream error (hard failure or desync). Closing transport: {:?}",
                             e
                         );
-                        self.is_connected = false;
-                        self.transport = None;
+                        self.connection.is_connected = false;
+                        self.connection.transport = None;
                     }
                 }
                 res
             }
             ZKTransport::Udp(ref mut socket) => {
-                self.udp_buf.resize(2048, 0);
-                let len = socket.recv(&mut self.udp_buf)?;
-                let packet_data = self.udp_buf[..len].to_vec();
+                self.connection.udp_buf.resize(2048, 0);
+                let len = socket.recv(&mut self.connection.udp_buf)?;
+                let packet_data = self.connection.udp_buf[..len].to_vec();
                 crate::security::validate_packet_size(packet_data.len())?;
                 ZKPacket::from_bytes_owned(packet_data)
             }
         };
 
         let packet = result?;
-        verify_packet_checksum(&packet, self.use_legacy_checksum)?;
+        verify_packet_checksum(&packet, self.connection.use_legacy_checksum)?;
         Ok(packet)
     }
 
@@ -195,11 +195,11 @@ impl ZK {
                 res_packet.reply_id()
             );
 
-            if res_packet.reply_id() != self.reply_id {
+            if res_packet.reply_id() != self.connection.reply_id {
                 discarded += 1;
                 log::debug!(
                     "Reply ID mismatch: expected {}, got {}. Discarding packet.",
-                    self.reply_id,
+                    self.connection.reply_id,
                     res_packet.reply_id()
                 );
                 if discarded > MAX_DISCARDED_PACKETS {
@@ -217,21 +217,21 @@ impl ZK {
     /// Send a ZKPacket over the current transport.
     /// Handles TCP framing (magic + length prefix) and UDP direct send uniformly.
     pub(crate) fn send_packet(&mut self, packet: &ZKPacket<'_>) -> ZKResult<()> {
-        let transport = self.transport.as_mut().ok_or_else(|| {
+        let transport = self.connection.transport.as_mut().ok_or_else(|| {
             ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
         })?;
 
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
-                self.write_buf.clear();
-                packet.to_bytes_into(&mut self.write_buf)?;
-                let framed = TCPWrapper::wrap(&self.write_buf);
+                self.connection.write_buf.clear();
+                packet.to_bytes_into(&mut self.connection.write_buf)?;
+                let framed = TCPWrapper::wrap(&self.connection.write_buf);
                 reader.get_mut().write_all(&framed)?;
             }
             ZKTransport::Udp(ref mut socket) => {
-                self.write_buf.clear();
-                packet.to_bytes_into(&mut self.write_buf)?;
-                socket.send(&self.write_buf)?;
+                self.connection.write_buf.clear();
+                packet.to_bytes_into(&mut self.connection.write_buf)?;
+                socket.send(&self.connection.write_buf)?;
             }
         }
         Ok(())
@@ -239,9 +239,9 @@ impl ZK {
 
     /// Increment and wrap the reply ID for the next command-response cycle.
     fn increment_reply_id(&mut self) {
-        self.reply_id = self.reply_id.wrapping_add(1);
-        if self.reply_id == USHRT_MAX {
-            self.reply_id -= USHRT_MAX;
+        self.connection.reply_id = self.connection.reply_id.wrapping_add(1);
+        if self.connection.reply_id == USHRT_MAX {
+            self.connection.reply_id -= USHRT_MAX;
         }
     }
 
@@ -250,7 +250,7 @@ impl ZK {
         command: u16,
         payload: &[u8],
     ) -> ZKResult<ZKPacket<'static>> {
-        if self.transport.is_none() {
+        if self.connection.transport.is_none() {
             return Err(ZKError::Connection(
                 ZKErrorCode::ConnectionFailed,
                 "Not connected".into(),
@@ -263,13 +263,13 @@ impl ZK {
             "Sending Command: {} (0x{:X}), Reply ID: {}",
             command,
             command,
-            self.reply_id
+            self.connection.reply_id
         );
 
-        let packet = if self.use_legacy_checksum {
-            ZKPacket::new_with_legacy(command, self.session_id, self.reply_id, payload)
+        let packet = if self.connection.use_legacy_checksum {
+            ZKPacket::new_with_legacy(command, self.connection.session_id, self.connection.reply_id, payload)
         } else {
-            ZKPacket::new(command, self.session_id, self.reply_id, payload)
+            ZKPacket::new(command, self.connection.session_id, self.connection.reply_id, payload)
         };
 
         self.send_packet(&packet)?;
@@ -337,7 +337,7 @@ impl ZK {
     }
 
     fn read_chunk_into(&mut self, start: i32, size: i32, data: &mut Vec<u8>) -> ZKResult<()> {
-        let is_udp = matches!(&self.transport, Some(ZKTransport::Udp(_)));
+        let is_udp = matches!(&self.connection.transport, Some(ZKTransport::Udp(_)));
 
         let mut payload = [0u8; 8];
         byteorder::LittleEndian::write_i32(&mut payload[0..4], start);
@@ -433,7 +433,7 @@ impl ZK {
             return Ok(Vec::new());
         }
 
-        let max_chunk = if matches!(&self.transport, Some(ZKTransport::Tcp(_))) {
+        let max_chunk = if matches!(&self.connection.transport, Some(ZKTransport::Tcp(_))) {
             TCP_MAX_CHUNK
         } else {
             UDP_MAX_CHUNK
@@ -445,7 +445,7 @@ impl ZK {
     }
 
     pub fn connect(&mut self, protocol: ZKProtocol) -> ZKResult<()> {
-        if self.is_connected {
+        if self.connection.is_connected {
             return Err(ZKError::Connection(
                 ZKErrorCode::ConnectionFailed,
                 "Already connected. Call disconnect() first.".into(),
@@ -455,12 +455,12 @@ impl ZK {
             ZKProtocol::TCP => self.connect_tcp(),
             ZKProtocol::UDP => self.connect_udp(),
             ZKProtocol::Auto => {
-                let saved_checksum = self.use_legacy_checksum;
+                let saved_checksum = self.connection.use_legacy_checksum;
                 match self.connect_tcp() {
                     Ok(_) => Ok(()),
                     Err(e) => {
                         log::info!("TCP connect failed: {}. Falling back to UDP...", e);
-                        self.use_legacy_checksum = saved_checksum;
+                        self.connection.use_legacy_checksum = saved_checksum;
                         self.connect_udp()
                     }
                 }
@@ -469,29 +469,29 @@ impl ZK {
     }
 
     fn connect_tcp(&mut self) -> ZKResult<()> {
-        let addrs = self.addr.to_socket_addrs().map_err(|e| {
+        let addrs = self.connection.addr.to_socket_addrs().map_err(|e| {
             ZKError::Connection(
                 ZKErrorCode::ConnectionFailed,
-                format!("Failed to resolve address {}: {}", self.addr, e),
+                format!("Failed to resolve address {}: {}", self.connection.addr, e),
             )
         })?;
         let addr = addrs.into_iter().next().ok_or_else(|| {
             ZKError::Connection(
                 ZKErrorCode::ConnectionFailed,
-                format!("No address found for {}", self.addr),
+                format!("No address found for {}", self.connection.addr),
             )
         })?;
 
         let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
         stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(self.timeout))?;
-        stream.set_write_timeout(Some(self.timeout))?;
+        stream.set_read_timeout(Some(self.config.timeout))?;
+        stream.set_write_timeout(Some(self.config.timeout))?;
 
-        self.transport = Some(ZKTransport::Tcp(std::io::BufReader::new(stream)));
+        self.connection.transport = Some(ZKTransport::Tcp(std::io::BufReader::new(stream)));
         match self.perform_connect_handshake() {
             Ok(()) => Ok(()),
             Err(e) => {
-                self.transport = None;
+                self.connection.transport = None;
                 Err(e)
             }
         }
@@ -504,31 +504,31 @@ impl ZK {
             log::debug!("Failed to set UDP receive buffer size (SO_RCVBUF): {}", e);
         }
         let socket = std::net::UdpSocket::from(socket2_sock);
-        socket.connect(&self.addr)?;
-        socket.set_read_timeout(Some(self.timeout))?;
-        socket.set_write_timeout(Some(self.timeout))?;
+        socket.connect(&self.connection.addr)?;
+        socket.set_read_timeout(Some(self.config.timeout))?;
+        socket.set_write_timeout(Some(self.config.timeout))?;
 
-        self.transport = Some(ZKTransport::Udp(socket));
+        self.connection.transport = Some(ZKTransport::Udp(socket));
         match self.perform_connect_handshake() {
             Ok(()) => Ok(()),
             Err(e) => {
-                self.transport = None;
+                self.connection.transport = None;
                 Err(e)
             }
         }
     }
 
     pub(crate) fn send_exit_packet(&mut self) -> ZKResult<()> {
-        if self.transport.is_some() {
-            self.reply_id = self.reply_id.wrapping_add(1);
-            if self.reply_id == USHRT_MAX {
-                self.reply_id -= USHRT_MAX;
+        if self.connection.transport.is_some() {
+            self.connection.reply_id = self.connection.reply_id.wrapping_add(1);
+            if self.connection.reply_id == USHRT_MAX {
+                self.connection.reply_id -= USHRT_MAX;
             }
 
-            let packet = if self.use_legacy_checksum {
-                ZKPacket::new_with_legacy(CMD_EXIT, self.session_id, self.reply_id, &[])
+            let packet = if self.connection.use_legacy_checksum {
+                ZKPacket::new_with_legacy(CMD_EXIT, self.connection.session_id, self.connection.reply_id, &[])
             } else {
-                ZKPacket::new(CMD_EXIT, self.session_id, self.reply_id, &[])
+                ZKPacket::new(CMD_EXIT, self.connection.session_id, self.connection.reply_id, &[])
             };
 
             self.send_packet(&packet)?;
@@ -537,12 +537,12 @@ impl ZK {
     }
 
     pub fn disconnect(&mut self) -> ZKResult<()> {
-        if self.is_connected {
+        if self.connection.is_connected {
             self.set_transport_read_timeout(Duration::from_secs(3));
             let _ = self.send_command(CMD_EXIT, &[]);
-            self.is_connected = false;
+            self.connection.is_connected = false;
         }
-        self.transport = None;
+        self.connection.transport = None;
         Ok(())
     }
 }
@@ -799,12 +799,13 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_tracker_ok_up_to_21() {
+    fn test_empty_tracker_ok_up_to_20() {
         let mut tracker = EmptyResponseTracker::new();
-        for _ in 0..21 {
+        // 20 empty responses are tolerated (limit is >20, meaning 21st call errors)
+        for _ in 0..20 {
             assert!(tracker.record_empty().is_ok());
         }
-        // The 22nd call should fail
+        // The 21st call should fail
         assert!(tracker.record_empty().is_err());
     }
 }

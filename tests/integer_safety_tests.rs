@@ -52,6 +52,19 @@ fn handle_get_free_sizes(
     fingers: i32,
     records: i32,
 ) {
+    handle_get_free_sizes_full(stream, session_id, users, fingers, records, -5);
+}
+
+/// Helper: handle CMD_GET_FREE_SIZES with all fields (including cards + capacities).
+/// Offsets follow V2 firmware layout (constants::SIZES_V2_*).
+fn handle_get_free_sizes_full(
+    stream: &mut std::net::TcpStream,
+    session_id: u16,
+    users: i32,
+    fingers: i32,
+    records: i32,
+    faces: i32,
+) {
     let packet = read_one_packet(stream);
     assert_eq!(packet.command(), CMD_GET_FREE_SIZES);
     let mut bytes = vec![0u8; 92];
@@ -61,8 +74,18 @@ fn handle_get_free_sizes(
     <LittleEndian as ByteOrder>::write_i32(&mut bytes[24..28], fingers);
     // fields[8] = records at offset 32
     <LittleEndian as ByteOrder>::write_i32(&mut bytes[32..36], records);
-    // faces at offset 80 (first 4 bytes of the 80..92 range)
-    <LittleEndian as ByteOrder>::write_i32(&mut bytes[80..84], -5);
+    // cards at offset 48
+    <LittleEndian as ByteOrder>::write_i32(&mut bytes[48..52], -15);
+    // fingers_cap at offset 56
+    <LittleEndian as ByteOrder>::write_i32(&mut bytes[56..60], -200);
+    // users_cap at offset 60
+    <LittleEndian as ByteOrder>::write_i32(&mut bytes[60..64], -500);
+    // rec_cap at offset 64
+    <LittleEndian as ByteOrder>::write_i32(&mut bytes[64..68], -1000);
+    // faces at offset 80
+    <LittleEndian as ByteOrder>::write_i32(&mut bytes[80..84], faces);
+    // faces_cap at offset 88
+    <LittleEndian as ByteOrder>::write_i32(&mut bytes[88..92], -300);
     let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), bytes);
     send_packet(stream, &res);
 }
@@ -165,12 +188,18 @@ fn test_negative_device_fields_clamped_to_zero() {
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP).unwrap();
 
-    // read_sizes should succeed — clamping negatives to 0
+    // read_sizes should succeed — clamping negatives to 0 for ALL fields
     zk.read_sizes().unwrap();
     assert_eq!(zk.users(), 0, "Negative users should be clamped to 0");
     assert_eq!(zk.fingers(), 0, "Negative fingers should be clamped to 0");
     assert_eq!(zk.records(), 0, "Negative records should be clamped to 0");
     assert_eq!(zk.faces(), 0, "Negative faces should be clamped to 0");
+    // Capacity fields and cards must also be clamped (regression test for Debt #2 fix)
+    assert_eq!(zk.cards(), 0, "Negative cards should be clamped to 0");
+    assert_eq!(zk.users_cap(), 0, "Negative users_cap should be clamped to 0");
+    assert_eq!(zk.fingers_cap(), 0, "Negative fingers_cap should be clamped to 0");
+    assert_eq!(zk.records_cap(), 0, "Negative records_cap should be clamped to 0");
+    assert_eq!(zk.faces_cap(), 0, "Negative faces_cap should be clamped to 0");
 
     server.join().unwrap();
 }

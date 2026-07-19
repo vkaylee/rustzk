@@ -39,23 +39,23 @@ impl ZK {
                 info.users = read_sizes_field(data, SIZES_V2_USERS).max(0) as u32;
                 info.fingers = read_sizes_field(data, SIZES_V2_FINGERS).max(0) as u32;
                 info.records = read_sizes_field(data, SIZES_V2_RECORDS).max(0) as u32;
-                info.cards = read_sizes_field(data, SIZES_V2_CARDS);
-                info.fingers_cap = read_sizes_field(data, SIZES_V2_FINGERS_CAP);
-                info.users_cap = read_sizes_field(data, SIZES_V2_USERS_CAP);
-                info.rec_cap = read_sizes_field(data, SIZES_V2_REC_CAP);
+                info.cards = read_sizes_field(data, SIZES_V2_CARDS).max(0) as u32;
+                info.fingers_cap = read_sizes_field(data, SIZES_V2_FINGERS_CAP).max(0) as u32;
+                info.users_cap = read_sizes_field(data, SIZES_V2_USERS_CAP).max(0) as u32;
+                info.rec_cap = read_sizes_field(data, SIZES_V2_REC_CAP).max(0) as u32;
 
                 if data.len() >= SIZES_V2_EXT_MIN {
                     info.faces = read_sizes_field(data, SIZES_V2_FACES).max(0) as u32;
-                    info.faces_cap = read_sizes_field(data, SIZES_V2_FACES_CAP);
+                    info.faces_cap = read_sizes_field(data, SIZES_V2_FACES_CAP).max(0) as u32;
                 }
             } else if data.len() >= SIZES_V1_MIN {
                 // Older firmware formats
                 info.users = read_sizes_field(data, SIZES_V1_USERS).max(0) as u32;
                 info.fingers = read_sizes_field(data, SIZES_V1_FINGERS).max(0) as u32;
                 info.records = read_sizes_field(data, SIZES_V1_RECORDS).max(0) as u32;
-                info.users_cap = read_sizes_field(data, SIZES_V1_USERS_CAP);
-                info.fingers_cap = read_sizes_field(data, SIZES_V1_FINGERS_CAP);
-                info.rec_cap = read_sizes_field(data, SIZES_V1_REC_CAP);
+                info.users_cap = read_sizes_field(data, SIZES_V1_USERS_CAP).max(0) as u32;
+                info.fingers_cap = read_sizes_field(data, SIZES_V1_FINGERS_CAP).max(0) as u32;
+                info.rec_cap = read_sizes_field(data, SIZES_V1_REC_CAP).max(0) as u32;
             }
             self.device_info = Some(info);
             let _ = self.sync_timezone();
@@ -217,21 +217,21 @@ impl ZK {
     /// Note: After changing the password, you must use the new password for future connections.
     pub fn change_password(&mut self, new_password: u32) -> ZKResult<()> {
         self.set_option("ComKey", &new_password.to_string())?;
-        self.password = new_password; // Update local state to match
+        self.config.password = new_password; // Update local state to match
         Ok(())
     }
 
     pub fn restart(&mut self) -> ZKResult<()> {
         let result = self.send_command(CMD_RESTART, &[]);
-        self.is_connected = false;
-        self.transport = None;
+        self.connection.is_connected = false;
+        self.connection.transport = None;
         result.map(|_| ())
     }
 
     pub fn poweroff(&mut self) -> ZKResult<()> {
         let result = self.send_command(CMD_POWEROFF, &[]);
-        self.is_connected = false;
-        self.transport = None;
+        self.connection.is_connected = false;
+        self.connection.transport = None;
         result.map(|_| ())
     }
 
@@ -275,31 +275,31 @@ impl ZK {
     pub fn users(&self) -> u32 {
         self.device_info.map_or(0, |d| d.users)
     }
-    pub fn users_cap(&self) -> i32 {
+    pub fn users_cap(&self) -> u32 {
         self.device_info.map_or(0, |d| d.users_cap)
     }
     pub fn fingers(&self) -> u32 {
         self.device_info.map_or(0, |d| d.fingers)
     }
-    pub fn fingers_cap(&self) -> i32 {
+    pub fn fingers_cap(&self) -> u32 {
         self.device_info.map_or(0, |d| d.fingers_cap)
     }
     pub fn records(&self) -> u32 {
         self.device_info.map_or(0, |d| d.records)
     }
-    pub fn records_cap(&self) -> i32 {
+    pub fn records_cap(&self) -> u32 {
         self.device_info.map_or(0, |d| d.rec_cap)
     }
     pub fn faces(&self) -> u32 {
         self.device_info.map_or(0, |d| d.faces)
     }
-    pub fn faces_cap(&self) -> i32 {
+    pub fn faces_cap(&self) -> u32 {
         self.device_info.map_or(0, |d| d.faces_cap)
     }
-    pub fn cards(&self) -> i32 {
+    pub fn cards(&self) -> u32 {
         self.device_info.map_or(0, |d| d.cards)
     }
     pub fn is_connected(&self) -> bool {
-        self.is_connected
+        self.connection.is_connected
     }
 }

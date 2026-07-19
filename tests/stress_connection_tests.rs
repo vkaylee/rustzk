@@ -11,7 +11,7 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::{ZKProtocol, ZK};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;

@@ -175,7 +175,7 @@ impl ZK {
 
     /// Internal helper to send a simple ACK_OK response.
     pub(crate) fn send_ack_ok(&mut self) -> ZKResult<()> {
-        let packet = ZKPacket::new(CMD_ACK_OK, self.session_id, self.reply_id, &[]);
+        let packet = ZKPacket::new(CMD_ACK_OK, self.connection.session_id, self.connection.reply_id, &[]);
         self.send_packet(&packet)
     }
 

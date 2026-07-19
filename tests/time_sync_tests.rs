@@ -47,6 +47,7 @@ fn test_lazy_sync_happens_only_once() {
     let (server, port) = MockZKServer::new()
         .with_session(5678)
         .no_default() // Panic on any unexpected command
+        .on(CMD_CONNECT, |_rid, _| Some((CMD_ACK_OK, vec![])))
         .on(CMD_OPTIONS_RRQ, |_rid, _| {
             Some((CMD_ACK_OK, b"TZAdj=8\0".to_vec()))
         })

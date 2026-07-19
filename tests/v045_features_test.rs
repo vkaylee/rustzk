@@ -1,6 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use rustzk::constants::*;
 use rustzk::{ZKProtocol, ZK};
+use std::io::{Read, Write};
 
 mod common;
 use common::MockZKServer;
