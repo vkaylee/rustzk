@@ -7,6 +7,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+mod common;
+use common::MockZKServer;
+
 #[test]
 fn test_zk_drop_auto_disconnects() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
@@ -129,38 +132,9 @@ fn test_zk_manual_disconnect_then_drop() {
 
 #[test]
 fn test_zk_double_connect_returns_error() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind mock server");
-    let addr = listener.local_addr().unwrap();
-    let port = addr.port();
-
-    thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("Failed to accept connection");
-
-        loop {
-            let mut header = [0u8; 8];
-            if stream.read_exact(&mut header).is_err() {
-                break;
-            }
-
-            let (length, _) = TCPWrapper::decode_header(&header).unwrap();
-            let mut body = vec![0u8; length];
-            stream.read_exact(&mut body).unwrap();
-            let packet = ZKPacket::from_bytes(&body).unwrap();
-
-            match packet.command() {
-                CMD_CONNECT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
-                    let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
-                }
-                CMD_EXIT => {
-                    let res = ZKPacket::new(CMD_ACK_OK, 1234, packet.reply_id(), vec![]);
-                    let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
-                    break;
-                }
-                _ => {}
-            }
-        }
-    });
+    let (server, port) = MockZKServer::new()
+        .with_session(1234)
+        .spawn();
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP)
@@ -178,6 +152,7 @@ fn test_zk_double_connect_returns_error() {
     );
 
     zk.disconnect().unwrap();
+    server.join();
 }
 
 #[test]

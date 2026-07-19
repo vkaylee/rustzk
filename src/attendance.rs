@@ -81,7 +81,7 @@ impl ZK {
     /// Retrieves all attendance records from the device.
     pub fn get_attendance(&mut self) -> ZKResult<Vec<Attendance>> {
         self.read_sizes()?;
-        if self.records == 0 {
+        if self.records() == 0 {
             return Ok(Vec::new());
         }
 
@@ -102,7 +102,7 @@ impl ZK {
             ));
         }
 
-        let record_size = detect_record_size(total_size, self.records as usize);
+        let record_size = detect_record_size(total_size, self.records() as usize);
         let data = &attendance_data[4..];
 
         if !can_parse_record_size(record_size, total_size) {
@@ -115,7 +115,7 @@ impl ZK {
             ));
         }
 
-        let capacity = std::cmp::min(self.records as usize, data.len() / record_size);
+        let capacity = std::cmp::min(self.records() as usize, data.len() / record_size);
         let mut attendances = Vec::with_capacity(capacity);
 
         let mut uid_cache: HashMap<u32, String> = HashMap::new();

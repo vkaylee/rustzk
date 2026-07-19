@@ -9,7 +9,7 @@ impl ZK {
     /// Retrieves all users from the device.
     pub fn get_users(&mut self) -> ZKResult<Vec<User>> {
         self.read_sizes()?;
-        if self.users == 0 {
+        if self.users() == 0 {
             return Ok(Vec::new());
         }
 
@@ -31,11 +31,11 @@ impl ZK {
         if total_size == 0 {
             return Ok(Vec::new());
         }
-        self.user_packet_size = total_size / self.users as usize;
+        self.user_packet_size = total_size / self.users() as usize;
         let data = &userdata[4..];
 
         let mut users = Vec::with_capacity(std::cmp::min(
-            self.users as usize,
+            self.users() as usize,
             data.len() / self.user_packet_size,
         ));
         let mut offset = 0;
@@ -208,7 +208,7 @@ impl ZK {
     /// Retrieves all fingerprint templates from the device.
     pub fn get_templates(&mut self) -> ZKResult<Vec<Finger>> {
         self.read_sizes()?;
-        if self.fingers == 0 {
+        if self.fingers() == 0 {
             return Ok(Vec::new());
         }
 
@@ -236,7 +236,7 @@ impl ZK {
         }
         let mut data = &templatedata[4..];
         let mut templates =
-            Vec::with_capacity(std::cmp::min(self.fingers as usize, data.len() / 6));
+            Vec::with_capacity(std::cmp::min(self.fingers() as usize, data.len() / 6));
 
         while total_size > 0 && data.len() >= 6 {
             let size = LittleEndian::read_u16(&data[0..2]) as usize;

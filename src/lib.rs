@@ -89,15 +89,7 @@ pub struct ZK {
     is_connected: bool,
     user_id_cache: Option<std::collections::HashMap<u16, String>>,
     user_packet_size: usize,
-    users: u32,
-    fingers: u32,
-    records: u32,
-    cards: i32,
-    faces: u32,
-    fingers_cap: i32,
-    users_cap: i32,
-    rec_cap: i32,
-    faces_cap: i32,
+    device_info: Option<models::DeviceInfo>,
     encoding: &'static str,
     password: u32,
     timezone_offset: i32, // Offset in minutes
@@ -120,15 +112,7 @@ impl ZK {
             is_connected: false,
             user_id_cache: None,
             user_packet_size: 28,
-            users: 0,
-            fingers: 0,
-            records: 0,
-            cards: 0,
-            faces: 0,
-            fingers_cap: 0,
-            users_cap: 0,
-            rec_cap: 0,
-            faces_cap: 0,
+            device_info: None,
             encoding: "UTF-8",
             udp_buf: vec![0u8; 2048],
             write_buf: Vec::with_capacity(1024),
@@ -429,6 +413,21 @@ mod tests {
 
         assert_eq!(zk.encoding(), "UTF-8");
         assert!(!zk.is_alive());
+    }
+
+    #[test]
+    fn test_zk_device_info_getters_return_zero_when_none() {
+        let zk = ZK::new("192.168.1.201", 4370);
+        // Before read_sizes(), device_info is None — all getters should return 0.
+        assert_eq!(zk.users(), 0);
+        assert_eq!(zk.users_cap(), 0);
+        assert_eq!(zk.fingers(), 0);
+        assert_eq!(zk.fingers_cap(), 0);
+        assert_eq!(zk.records(), 0);
+        assert_eq!(zk.records_cap(), 0);
+        assert_eq!(zk.faces(), 0);
+        assert_eq!(zk.faces_cap(), 0);
+        assert_eq!(zk.cards(), 0);
     }
 
     #[test]

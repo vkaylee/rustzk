@@ -385,6 +385,30 @@ impl ZK {
         }))
     }
 
+    /// Drain a buffered response in chunks, handling empty-response backoff.
+    fn drain_buffer_chunks(&mut self, mut size: usize, max_chunk: usize) -> ZKResult<Vec<u8>> {
+        let mut data = Vec::with_capacity(size);
+        let mut start: usize = 0;
+        let mut tracker = EmptyResponseTracker::new();
+
+        while size > 0 {
+            let chunk_size = std::cmp::min(size, max_chunk);
+            let len_before = data.len();
+            self.read_chunk_into(start as i32, chunk_size as i32, &mut data)?;
+            let chunk_len = data.len() - len_before;
+
+            if chunk_len == 0 {
+                tracker.record_empty()?;
+                continue;
+            }
+
+            tracker.reset();
+            start += chunk_len;
+            size = size.saturating_sub(chunk_len);
+        }
+        Ok(data)
+    }
+
     pub(crate) fn read_with_buffer(
         &mut self,
         command: u16,
@@ -409,45 +433,13 @@ impl ZK {
             return Ok(Vec::new());
         }
 
-        let max_chunk = if let Some(ZKTransport::Tcp(_)) = self.transport {
+        let max_chunk = if matches!(&self.transport, Some(ZKTransport::Tcp(_))) {
             TCP_MAX_CHUNK
         } else {
             UDP_MAX_CHUNK
         };
 
-        let mut data = Vec::with_capacity(size);
-        let mut start = 0;
-        let mut remaining = size;
-        let mut empty_responses_count = 0;
-
-        while remaining > 0 {
-            let chunk_size = std::cmp::min(remaining, max_chunk);
-            let len_before = data.len();
-            self.read_chunk_into(start as i32, chunk_size as i32, &mut data)?;
-            let chunk_len = data.len() - len_before;
-
-            if chunk_len == 0 {
-                empty_responses_count += 1;
-                if empty_responses_count > 20 {
-                    return Err(ZKError::Response(
-                        ZKErrorCode::Timeout,
-                        "Too many empty responses from device during buffer read".into(),
-                    ));
-                }
-                let sleep_ms = std::cmp::min(1 << empty_responses_count, 50);
-                std::thread::sleep(std::time::Duration::from_millis(sleep_ms as u64));
-                continue;
-            }
-
-            empty_responses_count = 0; // Reset counter on success
-            start += chunk_len;
-            if remaining >= chunk_len {
-                remaining -= chunk_len;
-            } else {
-                remaining = 0;
-            }
-        }
-
+        let data = self.drain_buffer_chunks(size, max_chunk)?;
         let _ = self.send_command(CMD_FREE_DATA, &[]);
         Ok(data)
     }
@@ -556,6 +548,40 @@ impl ZK {
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
+
+/// Tracks consecutive empty chunk responses during buffered reads,
+/// applying exponential backoff (capped at 50 ms). Returns an error
+/// after more than 20 consecutive empty responses to prevent infinite
+/// spinning on a misbehaving device.
+struct EmptyResponseTracker {
+    count: u32,
+}
+
+impl EmptyResponseTracker {
+    fn new() -> Self {
+        Self { count: 0 }
+    }
+
+    /// Record an empty response. Returns `Err` once the limit is exceeded
+    /// or sleeps with exponential backoff.
+    fn record_empty(&mut self) -> ZKResult<()> {
+        self.count += 1;
+        if self.count > 20 {
+            return Err(ZKError::Response(
+                ZKErrorCode::Timeout,
+                "Too many empty responses from device during buffer read".into(),
+            ));
+        }
+        // Exponential backoff capped at 50 ms (1u64 << n is safe for n <= 20).
+        let sleep_ms = std::cmp::min(1u64 << self.count, 50);
+        std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.count = 0;
+    }
+}
 
 /// Read and parse a complete TCP-framed ZK packet from the stream.
 ///
@@ -746,5 +772,39 @@ mod tests {
     fn test_verify_checksum_legacy_valid() {
         let packet = ZKPacket::new_with_legacy(CMD_CONNECT, 0, 65534, vec![]);
         assert!(verify_packet_checksum(&packet, true).is_ok());
+    }
+
+    // ── EmptyResponseTracker tests ──────────────────────────────────────
+
+    #[test]
+    fn test_empty_tracker_new_resets() {
+        let mut tracker = EmptyResponseTracker::new();
+        // One empty, reset, one more — should not hit limit
+        assert!(tracker.record_empty().is_ok());
+        tracker.reset();
+        assert!(tracker.record_empty().is_ok());
+    }
+
+    #[test]
+    fn test_empty_tracker_hits_limit() {
+        let mut tracker = EmptyResponseTracker::new();
+        for _ in 0..21 {
+            let _ = tracker.record_empty();
+        }
+        let err = tracker.record_empty().unwrap_err();
+        assert!(matches!(
+            err,
+            ZKError::Response(ZKErrorCode::Timeout, _)
+        ));
+    }
+
+    #[test]
+    fn test_empty_tracker_ok_up_to_21() {
+        let mut tracker = EmptyResponseTracker::new();
+        for _ in 0..21 {
+            assert!(tracker.record_empty().is_ok());
+        }
+        // The 22nd call should fail
+        assert!(tracker.record_empty().is_err());
     }
 }

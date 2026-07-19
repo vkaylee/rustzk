@@ -2,6 +2,7 @@ use byteorder::ByteOrder;
 use chrono::{DateTime, FixedOffset, TimeZone};
 
 use crate::constants::*;
+use crate::models::DeviceInfo;
 use crate::{ZKError, ZKErrorCode, ZKResult, ZK};
 
 /// Read a 4-byte little-endian i32 from `data` at the given byte offset.
@@ -33,28 +34,30 @@ impl ZK {
 
         if res.command() == CMD_ACK_OK || res.command() == CMD_ACK_DATA {
             let data = res.payload();
+            let mut info = DeviceInfo::default();
             if data.len() >= SIZES_V2_MIN {
-                self.users = read_sizes_field(data, SIZES_V2_USERS).max(0) as u32;
-                self.fingers = read_sizes_field(data, SIZES_V2_FINGERS).max(0) as u32;
-                self.records = read_sizes_field(data, SIZES_V2_RECORDS).max(0) as u32;
-                self.cards = read_sizes_field(data, SIZES_V2_CARDS);
-                self.fingers_cap = read_sizes_field(data, SIZES_V2_FINGERS_CAP);
-                self.users_cap = read_sizes_field(data, SIZES_V2_USERS_CAP);
-                self.rec_cap = read_sizes_field(data, SIZES_V2_REC_CAP);
+                info.users = read_sizes_field(data, SIZES_V2_USERS).max(0) as u32;
+                info.fingers = read_sizes_field(data, SIZES_V2_FINGERS).max(0) as u32;
+                info.records = read_sizes_field(data, SIZES_V2_RECORDS).max(0) as u32;
+                info.cards = read_sizes_field(data, SIZES_V2_CARDS);
+                info.fingers_cap = read_sizes_field(data, SIZES_V2_FINGERS_CAP);
+                info.users_cap = read_sizes_field(data, SIZES_V2_USERS_CAP);
+                info.rec_cap = read_sizes_field(data, SIZES_V2_REC_CAP);
 
                 if data.len() >= SIZES_V2_EXT_MIN {
-                    self.faces = read_sizes_field(data, SIZES_V2_FACES).max(0) as u32;
-                    self.faces_cap = read_sizes_field(data, SIZES_V2_FACES_CAP);
+                    info.faces = read_sizes_field(data, SIZES_V2_FACES).max(0) as u32;
+                    info.faces_cap = read_sizes_field(data, SIZES_V2_FACES_CAP);
                 }
             } else if data.len() >= SIZES_V1_MIN {
                 // Older firmware formats
-                self.users = read_sizes_field(data, SIZES_V1_USERS).max(0) as u32;
-                self.fingers = read_sizes_field(data, SIZES_V1_FINGERS).max(0) as u32;
-                self.records = read_sizes_field(data, SIZES_V1_RECORDS).max(0) as u32;
-                self.users_cap = read_sizes_field(data, SIZES_V1_USERS_CAP);
-                self.fingers_cap = read_sizes_field(data, SIZES_V1_FINGERS_CAP);
-                self.rec_cap = read_sizes_field(data, SIZES_V1_REC_CAP);
+                info.users = read_sizes_field(data, SIZES_V1_USERS).max(0) as u32;
+                info.fingers = read_sizes_field(data, SIZES_V1_FINGERS).max(0) as u32;
+                info.records = read_sizes_field(data, SIZES_V1_RECORDS).max(0) as u32;
+                info.users_cap = read_sizes_field(data, SIZES_V1_USERS_CAP);
+                info.fingers_cap = read_sizes_field(data, SIZES_V1_FINGERS_CAP);
+                info.rec_cap = read_sizes_field(data, SIZES_V1_REC_CAP);
             }
+            self.device_info = Some(info);
             let _ = self.sync_timezone();
             Ok(())
         } else {
@@ -270,31 +273,31 @@ impl ZK {
     }
 
     pub fn users(&self) -> u32 {
-        self.users
+        self.device_info.map_or(0, |d| d.users)
     }
     pub fn users_cap(&self) -> i32 {
-        self.users_cap
+        self.device_info.map_or(0, |d| d.users_cap)
     }
     pub fn fingers(&self) -> u32 {
-        self.fingers
+        self.device_info.map_or(0, |d| d.fingers)
     }
     pub fn fingers_cap(&self) -> i32 {
-        self.fingers_cap
+        self.device_info.map_or(0, |d| d.fingers_cap)
     }
     pub fn records(&self) -> u32 {
-        self.records
+        self.device_info.map_or(0, |d| d.records)
     }
     pub fn records_cap(&self) -> i32 {
-        self.rec_cap
+        self.device_info.map_or(0, |d| d.rec_cap)
     }
     pub fn faces(&self) -> u32 {
-        self.faces
+        self.device_info.map_or(0, |d| d.faces)
     }
     pub fn faces_cap(&self) -> i32 {
-        self.faces_cap
+        self.device_info.map_or(0, |d| d.faces_cap)
     }
     pub fn cards(&self) -> i32 {
-        self.cards
+        self.device_info.map_or(0, |d| d.cards)
     }
     pub fn is_connected(&self) -> bool {
         self.is_connected

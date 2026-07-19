@@ -11,30 +11,15 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use rustzk::constants::*;
 use rustzk::protocol::{TCPWrapper, ZKPacket};
 use rustzk::{ZKProtocol, ZK};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Helper: read one ZK request from a TCP stream (TCP-wrapped).
-fn read_request(stream: &mut TcpStream) -> Option<ZKPacket<'static>> {
-    let mut header = [0u8; 8];
-    if stream.read_exact(&mut header).is_err() {
-        return None;
-    }
-    let (length, _) = TCPWrapper::decode_header(&header).ok()?;
-    let mut body = vec![0u8; length];
-    stream.read_exact(&mut body).ok()?;
-    ZKPacket::from_bytes_owned(body).ok()
-}
-
-/// Helper: send a ZK response over TCP (TCP-wrapped).
-fn send_response(stream: &mut TcpStream, packet: &ZKPacket) {
-    let _ = stream.write_all(&TCPWrapper::wrap(&packet.to_bytes()));
-    let _ = stream.flush();
-}
+mod common;
+use common::{send_response, try_read_request};
 
 /// Helper: build a CMD_GET_FREE_SIZES response with N users and M records.
 fn build_sizes_payload(users: i32, records: i32) -> Vec<u8> {
@@ -67,7 +52,7 @@ fn spawn_reusable_mock_server(
             };
             let session_id: u16 = 5555;
 
-            while let Some(packet) = read_request(&mut stream) {
+            while let Some(packet) = try_read_request(&mut stream) {
                 match packet.command() {
                     CMD_CONNECT => {
                         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
@@ -118,7 +103,7 @@ fn spawn_data_mock_server(
             let session_id: u16 = 7777;
             let mut last_prepared_cmd: u16 = 0;
 
-            while let Some(packet) = read_request(&mut stream) {
+            while let Some(packet) = try_read_request(&mut stream) {
                 match packet.command() {
                     CMD_CONNECT => {
                         let res = ZKPacket::new(CMD_ACK_OK, session_id, packet.reply_id(), vec![]);
@@ -488,7 +473,7 @@ fn stress_handshake_timeout_recovery() {
             send_response(&mut stream, &res);
 
             // Handle CMD_EXIT
-            while let Some(pkt) = read_request(&mut stream) {
+            while let Some(pkt) = try_read_request(&mut stream) {
                 let res = ZKPacket::new_with_legacy(CMD_ACK_OK, 8888, pkt.reply_id(), vec![]);
                 send_response(&mut stream, &res);
                 if pkt.command() == CMD_EXIT {

@@ -388,6 +388,20 @@ fn user_to_bytes<L: UserPacketLayout>(user: &User) -> ZKResult<Vec<u8>> {
     Ok(payload)
 }
 
+/// Device capacity and usage statistics populated by [`ZK::read_sizes`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DeviceInfo {
+    pub users: u32,
+    pub fingers: u32,
+    pub records: u32,
+    pub cards: i32,
+    pub faces: u32,
+    pub fingers_cap: i32,
+    pub users_cap: i32,
+    pub rec_cap: i32,
+    pub faces_cap: i32,
+}
+
 /// Represents a fingerprint template.
 #[derive(Debug, Clone)]
 pub struct Finger {
@@ -437,6 +451,46 @@ impl Finger {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    // ── DeviceInfo tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_device_info_default_all_zeros() {
+        let info = DeviceInfo::default();
+        assert_eq!(info.users, 0);
+        assert_eq!(info.fingers, 0);
+        assert_eq!(info.records, 0);
+        assert_eq!(info.cards, 0);
+        assert_eq!(info.faces, 0);
+        assert_eq!(info.fingers_cap, 0);
+        assert_eq!(info.users_cap, 0);
+        assert_eq!(info.rec_cap, 0);
+        assert_eq!(info.faces_cap, 0);
+    }
+
+    #[test]
+    fn test_device_info_values_persist() {
+        let info = DeviceInfo {
+            users: 100,
+            fingers: 200,
+            records: 5000,
+            cards: 50,
+            faces: 30,
+            fingers_cap: 1000,
+            users_cap: 500,
+            rec_cap: 10000,
+            faces_cap: 200,
+        };
+        assert_eq!(info.users, 100);
+        assert_eq!(info.fingers, 200);
+        assert_eq!(info.records, 5000);
+        assert_eq!(info.cards, 50);
+        assert_eq!(info.faces, 30);
+        assert_eq!(info.fingers_cap, 1000);
+        assert_eq!(info.users_cap, 500);
+        assert_eq!(info.rec_cap, 10000);
+        assert_eq!(info.faces_cap, 200);
+    }
 
     #[test]
     fn test_user_privileges() {

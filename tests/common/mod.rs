@@ -14,6 +14,11 @@ use std::thread;
 /// an optional response as (response_command, response_payload).
 pub type CmdHandler = dyn Fn(u16, &[u8]) -> Option<(u16, Vec<u8>)> + Send + 'static;
 
+/// A type-erased multi-packet handler: receives (reply_id, payload, stream)
+/// and writes responses directly. Returns `true` if the default ACK should
+/// still be sent, `false` if the handler already sent a response.
+pub type MultiCmdHandler = dyn Fn(u16, &[u8], &mut TcpStream) -> bool + Send + 'static;
+
 /// Builder for a TCP mock ZK device server.
 ///
 /// # Quick start
@@ -33,6 +38,8 @@ pub type CmdHandler = dyn Fn(u16, &[u8]) -> Option<(u16, Vec<u8>)> + Send + 'sta
 pub struct MockZKServer {
     session_id: u16,
     handlers: Vec<(u16, Box<CmdHandler>)>,
+    multi_handlers: Vec<(u16, Box<MultiCmdHandler>)>,
+    drop_commands: Vec<u16>,
     default_ack: bool,
 }
 
@@ -47,6 +54,8 @@ impl MockZKServer {
         MockZKServer {
             session_id: 1234,
             handlers: Vec::new(),
+            multi_handlers: Vec::new(),
+            drop_commands: Vec::new(),
             default_ack: true,
         }
     }
@@ -80,6 +89,41 @@ impl MockZKServer {
         self
     }
 
+    /// Register a multi-packet handler with direct stream access.
+    ///
+    /// The handler receives `(reply_id, payload, stream)` and writes
+    /// responses directly using [`send_response`]. Return `true` to also
+    /// send the default ACK, `false` if the handler already responded.
+    ///
+    /// # Example (ACK_OK then CMD_DATA)
+    ///
+    /// ```ignore
+    /// .on_multi(_CMD_READ_BUFFER, |rid, _payload, stream| {
+    ///     let ack = ZKPacket::new(CMD_ACK_OK, session_id, rid, vec![]);
+    ///     send_response(stream, &ack);
+    ///     let data = ZKPacket::new(CMD_DATA, session_id, rid, data_bytes);
+    ///     send_response(stream, &data);
+    ///     false // don't send default ACK
+    /// })
+    /// ```
+    pub fn on_multi(
+        mut self,
+        cmd: u16,
+        handler: impl Fn(u16, &[u8], &mut TcpStream) -> bool + Send + 'static,
+    ) -> Self {
+        self.multi_handlers.push((cmd, Box::new(handler)));
+        self
+    }
+
+    /// Register a command to be silently dropped (no response sent).
+    ///
+    /// Useful for simulating firmware that discards packets with wrong
+    /// checksums instead of sending an error.
+    pub fn on_drop(mut self, cmd: u16) -> Self {
+        self.drop_commands.push(cmd);
+        self
+    }
+
     /// Disable the default `CMD_ACK_OK` response for unhandled commands.
     /// Unhandled commands will cause the server to panic (fail loudly in tests).
     pub fn no_default(mut self) -> Self {
@@ -93,6 +137,8 @@ impl MockZKServer {
         let port = listener.local_addr().unwrap().port();
         let session_id = self.session_id;
         let handlers = self.handlers;
+        let multi_handlers = self.multi_handlers;
+        let drop_commands = self.drop_commands;
         let default_ack = self.default_ack;
 
         let handle = thread::spawn(move || {
@@ -134,7 +180,24 @@ impl MockZKServer {
                     break;
                 }
 
-                // ── dispatch to registered handlers ──
+                // ── silently-dropped commands ──
+                if drop_commands.contains(&cmd) {
+                    continue;
+                }
+
+                // ── multi-packet handlers (direct stream access) ──
+                let mut handled_by_multi = false;
+                for (h_cmd, handler) in &multi_handlers {
+                    if *h_cmd == cmd {
+                        let fall_through = handler(rid, &payload, &mut stream);
+                        handled_by_multi = true;
+                        if !fall_through {
+                            break; // handler sent its own response, skip default
+                        }
+                    }
+                }
+
+                // ── dispatch to regular handlers ──
                 let mut responded = false;
                 for (h_cmd, handler) in &handlers {
                     if *h_cmd == cmd {
@@ -147,7 +210,8 @@ impl MockZKServer {
                     }
                 }
 
-                if !responded {
+                // ── fall through to default ──
+                if !handled_by_multi && !responded {
                     if default_ack {
                         let res = ZKPacket::new(CMD_ACK_OK, session_id, rid, vec![]);
                         let _ = stream.write_all(&TCPWrapper::wrap(&res.to_bytes()));
