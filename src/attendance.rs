@@ -401,7 +401,7 @@ fn parse_records_40(
 
     while offset + chunk_size <= data.len() {
         let chunk = &data[offset..offset + chunk_size];
-        let mut chunk_ptr = chunk;
+        let chunk_ptr;
 
         // Skip BOM-like prefix if present (e.g., b"\xff255\x00\x00\x00\x00\x00")
         if chunk.starts_with(b"\xff255\x00\x00\x00\x00\x00") {
@@ -409,29 +409,32 @@ fn parse_records_40(
             if chunk_ptr.len() < 30 {
                 break;
             }
+        } else {
+            chunk_ptr = chunk;
         }
 
-        parse_records_with(chunk_ptr, 0, chunk_ptr.len(), out, |full_chunk| {
-            let mut rdr = io::Cursor::new(full_chunk);
-            let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
-            let mut user_id_bytes = [0u8; 24];
-            rdr.read_exact(&mut user_id_bytes)?;
-            let status = rdr.read_u8()?;
-            let mut time_bytes = [0u8; 4];
-            rdr.read_exact(&mut time_bytes)?;
-            let punch = rdr.read_u8()?;
+        // Parse one record directly from chunk_ptr
+        let mut rdr = io::Cursor::new(chunk_ptr);
+        let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
+        let mut user_id_bytes = [0u8; 24];
+        rdr.read_exact(&mut user_id_bytes)?;
+        let status = rdr.read_u8()?;
+        let mut time_bytes = [0u8; 4];
+        rdr.read_exact(&mut time_bytes)?;
+        let punch = rdr.read_u8()?;
 
-            let timestamp = ZK::decode_time(&time_bytes)?;
-            let user_id = bytes_cache.get(&user_id_bytes).cloned().unwrap_or_else(|| {
-                let id = String::from_utf8_lossy(&user_id_bytes)
-                    .trim_matches('\0')
-                    .to_string();
-                bytes_cache.insert(user_id_bytes, id.clone());
-                id
-            });
+        let timestamp = ZK::decode_time(&time_bytes)?;
+        let user_id = bytes_cache.get(&user_id_bytes).cloned().unwrap_or_else(|| {
+            let id = String::from_utf8_lossy(&user_id_bytes)
+                .trim_matches('\0')
+                .to_string();
+            bytes_cache.insert(user_id_bytes, id.clone());
+            id
+        });
 
-            Ok(Attendance::new(uid as u32, user_id, timestamp, status, punch, tz_offset))
-        })?;
+        out.push(Attendance::new(
+            uid as u32, user_id, timestamp, status, punch, tz_offset,
+        ));
         offset += record_size;
     }
     Ok(())
