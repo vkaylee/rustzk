@@ -155,74 +155,11 @@ impl ZK {
             ZKError::Connection(ZKErrorCode::ConnectionFailed, "Not connected".into())
         })?;
 
-        match transport {
+        let result = match transport {
             ZKTransport::Tcp(ref mut reader) => {
-                let mut read_tcp_frame = || -> ZKResult<ZKPacket<'static>> {
-                    let mut header = [0u8; 8];
-                    // Read the first chunk (up to 8 bytes). If this blocks or times out,
-                    // 0 bytes have been consumed, so we are still in sync.
-                    let n = match reader.read(&mut header[..]) {
-                        Ok(0) => {
-                            return Err(ZKError::Network(std::io::Error::new(
-                                std::io::ErrorKind::UnexpectedEof,
-                                "TCP connection closed (EOF)",
-                            )))
-                        }
-                        Ok(n) => n,
-                        Err(e) => return Err(ZKError::Network(e)),
-                    };
-
-                    // If we read less than 8 bytes, we must read the rest.
-                    // Any error here is a desync because we already consumed `n` bytes.
-                    if n < 8 {
-                        let mut rest = vec![0u8; 8 - n];
-                        if let Err(e) = reader.read_exact(&mut rest) {
-                            return Err(ZKError::Network(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!("TCP desync: partial header read ({} bytes): {:?}", n, e),
-                            )));
-                        }
-                        header[n..8].copy_from_slice(&rest);
-                    }
-
-                    let (length, _) = TCPWrapper::decode_header(&header).map_err(|e| {
-                        ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, e.to_string())
-                    })?;
-
-                    crate::security::validate_packet_size(length)?;
-
-                    let mut body = vec![0u8; length];
-                    // Any error reading the body is a desync since we already read the header.
-                    if let Err(e) = reader.read_exact(&mut body) {
-                        return Err(ZKError::Network(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "TCP desync: failed to read body of size {}: {:?}",
-                                length, e
-                            ),
-                        )));
-                    }
-
-                    let packet = ZKPacket::from_bytes_owned(body)?;
-                    if !packet.verify_checksum(self.use_legacy_checksum) {
-                        return Err(ZKError::InvalidData(
-                            ZKErrorCode::ChecksumMismatch,
-                            "Invalid packet checksum".into(),
-                        ));
-                    }
-                    Ok(packet)
-                };
-
-                let res = read_tcp_frame();
+                let res = read_tcp_frame(reader);
                 if let Err(ref e) = res {
-                    let is_timeout = match e {
-                        ZKError::Network(io_err) => {
-                            io_err.kind() == std::io::ErrorKind::TimedOut
-                                || io_err.kind() == std::io::ErrorKind::WouldBlock
-                        }
-                        _ => false,
-                    };
-                    if !is_timeout {
+                    if !e.is_timeout() {
                         log::warn!(
                             "TCP stream error (hard failure or desync). Closing transport: {:?}",
                             e
@@ -237,19 +174,14 @@ impl ZK {
                 self.udp_buf.resize(2048, 0);
                 let len = socket.recv(&mut self.udp_buf)?;
                 let packet_data = self.udp_buf[..len].to_vec();
-
                 crate::security::validate_packet_size(packet_data.len())?;
-
-                let packet = ZKPacket::from_bytes_owned(packet_data)?;
-                if !packet.verify_checksum(self.use_legacy_checksum) {
-                    return Err(ZKError::InvalidData(
-                        ZKErrorCode::ChecksumMismatch,
-                        "Invalid packet checksum".into(),
-                    ));
-                }
-                Ok(packet)
+                ZKPacket::from_bytes_owned(packet_data)
             }
-        }
+        };
+
+        let packet = result?;
+        verify_packet_checksum(&packet, self.use_legacy_checksum)?;
+        Ok(packet)
     }
 
     pub(crate) fn read_response_safe(&mut self) -> ZKResult<ZKPacket<'static>> {
@@ -470,33 +402,7 @@ impl ZK {
             return Ok(res.into_payload().into_owned());
         }
 
-        let mut size = if res.payload().len() >= 5 {
-            byteorder::LittleEndian::read_u32(&res.payload()[1..5]) as usize
-        } else if res.payload().len() >= 4 {
-            byteorder::LittleEndian::read_u32(&res.payload()[0..4]) as usize
-        } else {
-            return Err(ZKError::Response(
-                ZKErrorCode::InvalidDataFormat,
-                format!("Invalid response size length: {}", res.payload().len()),
-            ));
-        };
-
-        if res.payload().len() >= 5 && size > MAX_RESPONSE_SIZE {
-            let alt_size = byteorder::LittleEndian::read_u32(&res.payload()[0..4]) as usize;
-            if alt_size <= MAX_RESPONSE_SIZE {
-                size = alt_size;
-            }
-        }
-
-        if size > MAX_RESPONSE_SIZE {
-            return Err(ZKError::InvalidData(
-                ZKErrorCode::BufferOverflow,
-                format!(
-                    "Buffered response size {} exceeds maximum {}",
-                    size, MAX_RESPONSE_SIZE
-                ),
-            ));
-        }
+        let size = detect_buffered_response_size(res.payload())?;
 
         if size == 0 {
             let _ = self.send_command(CMD_FREE_DATA, &[]);
@@ -646,5 +552,197 @@ impl ZK {
         }
         self.transport = None;
         Ok(())
+    }
+}
+
+// ── Private helpers ──────────────────────────────────────────────────────────
+
+/// Read and parse a complete TCP-framed ZK packet from the stream.
+///
+/// Handles partial header reads (desync detection), magic-number validation,
+/// packet size bounds checking, and body deserialization.
+fn read_tcp_frame(reader: &mut std::io::BufReader<TcpStream>) -> ZKResult<ZKPacket<'static>> {
+    let mut header = [0u8; 8];
+    // Read first chunk (up to 8 bytes). If this blocks/times out, 0 bytes
+    // consumed — stream is still in sync.
+    let n = match reader.read(&mut header[..]) {
+        Ok(0) => {
+            return Err(ZKError::Network(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "TCP connection closed (EOF)",
+            )))
+        }
+        Ok(n) => n,
+        Err(e) => return Err(ZKError::Network(e)),
+    };
+
+    // Partial read → read the rest. Any error here is a desync.
+    if n < 8 {
+        let mut rest = vec![0u8; 8 - n];
+        if let Err(e) = reader.read_exact(&mut rest) {
+            return Err(ZKError::Network(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("TCP desync: partial header read ({} bytes): {:?}", n, e),
+            )));
+        }
+        header[n..8].copy_from_slice(&rest);
+    }
+
+    let (length, _) = TCPWrapper::decode_header(&header).map_err(|e| {
+        ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, e.to_string())
+    })?;
+
+    crate::security::validate_packet_size(length)?;
+
+    let mut body = vec![0u8; length];
+    // Any error reading the body is a desync (header already consumed).
+    if let Err(e) = reader.read_exact(&mut body) {
+        return Err(ZKError::Network(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("TCP desync: failed to read body of size {}: {:?}", length, e),
+        )));
+    }
+
+    ZKPacket::from_bytes_owned(body)
+}
+
+/// Verify the packet checksum using the appropriate algorithm.
+fn verify_packet_checksum(packet: &ZKPacket, use_legacy: bool) -> ZKResult<()> {
+    if !packet.verify_checksum(use_legacy) {
+        return Err(ZKError::InvalidData(
+            ZKErrorCode::ChecksumMismatch,
+            "Invalid packet checksum".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Decode the expected response size from a PREPARE_DATA response payload.
+///
+/// Handles firmware variants that report the size at different offsets:
+/// - 5+ byte payloads: size at offset 1 (most common)
+/// - 4-byte payloads: size at offset 0 (older firmware)
+/// - Overflow fallback: tries alternative offset when primary exceeds limits
+fn detect_buffered_response_size(payload: &[u8]) -> ZKResult<usize> {
+    let mut size = if payload.len() >= 5 {
+        byteorder::LittleEndian::read_u32(&payload[1..5]) as usize
+    } else if payload.len() >= 4 {
+        byteorder::LittleEndian::read_u32(&payload[0..4]) as usize
+    } else {
+        return Err(ZKError::Response(
+            ZKErrorCode::InvalidDataFormat,
+            format!("Invalid response size length: {}", payload.len()),
+        ));
+    };
+
+    // Firmware quirk: some devices report size at offset 1 that exceeds limits,
+    // but the correct size is at offset 0. Try alternative offset as fallback.
+    if payload.len() >= 5 && size > MAX_RESPONSE_SIZE {
+        let alt_size = byteorder::LittleEndian::read_u32(&payload[0..4]) as usize;
+        if alt_size <= MAX_RESPONSE_SIZE {
+            size = alt_size;
+        }
+    }
+
+    if size > MAX_RESPONSE_SIZE {
+        return Err(ZKError::InvalidData(
+            ZKErrorCode::BufferOverflow,
+            format!(
+                "Buffered response size {} exceeds maximum {}",
+                size, MAX_RESPONSE_SIZE
+            ),
+        ));
+    }
+
+    Ok(size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── detect_buffered_response_size tests ────────────────────────────
+
+    #[test]
+    fn test_detect_size_5byte_payload_offset_1() {
+        // Payload with flag byte at [0]=1, u32 size at [1..5]
+        let mut payload = vec![0u8; 5];
+        payload[0] = 1;
+        byteorder::LittleEndian::write_u32(&mut payload[1..5], 1024);
+        assert_eq!(detect_buffered_response_size(&payload).unwrap(), 1024);
+    }
+
+    #[test]
+    fn test_detect_size_4byte_payload_offset_0() {
+        // Older firmware: just 4 bytes with size at offset 0
+        let mut payload = vec![0u8; 4];
+        byteorder::LittleEndian::write_u32(&mut payload[0..4], 512);
+        assert_eq!(detect_buffered_response_size(&payload).unwrap(), 512);
+    }
+
+    #[test]
+    fn test_detect_size_too_short() {
+        // Less than 4 bytes → error
+        let err = detect_buffered_response_size(&[1, 2, 3]).unwrap_err();
+        assert!(matches!(
+            err,
+            ZKError::Response(ZKErrorCode::InvalidDataFormat, _)
+        ));
+    }
+
+    #[test]
+    fn test_detect_size_firmware_quirk_fallback() {
+        // Simulate a device where offset-1 gives a huge value (wrong interpretation)
+        // but offset-0 gives the correct size.
+        // Byte layout: [0x00, 0x08, 0x00, 0x00, 0x01]
+        //   offset 1..5 → 0x01000008 = 16777224 > MAX_RESPONSE_SIZE
+        //   offset 0..4 → 0x00000800 = 2048 ≤ MAX_RESPONSE_SIZE
+        let payload = vec![0x00u8, 0x08, 0x00, 0x00, 0x01];
+        assert_eq!(detect_buffered_response_size(&payload).unwrap(), 2048);
+    }
+
+    #[test]
+    fn test_detect_size_both_offsets_exceed_max() {
+        // Both offset-0 and offset-1 readings exceed MAX_RESPONSE_SIZE
+        // Byte layout: all 0x01 → both offsets read 0x01010101 = 16843009 > 10485760
+        let payload = vec![0x01u8, 0x01, 0x01, 0x01, 0x01];
+        let err = detect_buffered_response_size(&payload).unwrap_err();
+        assert!(matches!(
+            err,
+            ZKError::InvalidData(ZKErrorCode::BufferOverflow, _)
+        ));
+    }
+
+    #[test]
+    fn test_detect_size_zero() {
+        let mut payload = vec![0u8; 5];
+        payload[0] = 1;
+        byteorder::LittleEndian::write_u32(&mut payload[1..5], 0);
+        assert_eq!(detect_buffered_response_size(&payload).unwrap(), 0);
+    }
+
+    // ── verify_packet_checksum tests ───────────────────────────────────
+
+    #[test]
+    fn test_verify_checksum_valid() {
+        let packet = ZKPacket::new(CMD_CONNECT, 0, 65534, vec![]);
+        assert!(verify_packet_checksum(&packet, false).is_ok());
+    }
+
+    #[test]
+    fn test_verify_checksum_invalid() {
+        let packet = ZKPacket::new(CMD_CONNECT, 0, 65534, vec![]);
+        // Verify with wrong algorithm → mismatch
+        let err = verify_packet_checksum(&packet, true).unwrap_err();
+        assert!(matches!(
+            err,
+            ZKError::InvalidData(ZKErrorCode::ChecksumMismatch, _)
+        ));
+    }
+
+    #[test]
+    fn test_verify_checksum_legacy_valid() {
+        let packet = ZKPacket::new_with_legacy(CMD_CONNECT, 0, 65534, vec![]);
+        assert!(verify_packet_checksum(&packet, true).is_ok());
     }
 }

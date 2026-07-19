@@ -122,6 +122,19 @@ impl ZK {
         let mut bytes_cache: HashMap<[u8; 24], String> = HashMap::new();
         let tz = self.timezone_offset;
 
+        // Ensure device user-ID cache is populated for 8-byte record resolution.
+        // This mirrors the lazy-load behavior of get_user_id_from_cache().
+        if self.user_id_cache.is_none() {
+            if let Err(e) = self.refresh_user_cache() {
+                log::warn!(
+                    "Failed to refresh user cache before parsing attendance: {}",
+                    e
+                );
+                self.user_id_cache = Some(HashMap::new());
+            }
+        }
+        let device_cache = self.user_id_cache.clone().unwrap_or_default();
+
         let is_8 = record_size_is(record_size, total_size, ATT_RECORD_SIZE_8);
         let is_16 = !is_8 && record_size_is(record_size, total_size, ATT_RECORD_SIZE_16);
         let is_40 = !is_8 && !is_16 && record_size >= ATT_RECORD_SIZE_40;
@@ -132,7 +145,7 @@ impl ZK {
                 record_size,
                 &mut attendances,
                 &mut uid_cache,
-                self,
+                &device_cache,
                 tz,
             )?;
         } else if is_16 {
@@ -292,6 +305,27 @@ fn can_parse_record_size(record_size: usize, total_size: usize) -> bool {
         || record_size >= ATT_RECORD_SIZE_40
 }
 
+/// Iterate over attendance records in `data`, calling `parse_chunk` for each
+/// record-sized chunk. Handles the loop, offset tracking, and error propagation.
+fn parse_records_with<F>(
+    data: &[u8],
+    record_size: usize,
+    chunk_size: usize,
+    out: &mut Vec<Attendance>,
+    mut parse_chunk: F,
+) -> ZKResult<()>
+where
+    F: FnMut(&[u8]) -> ZKResult<Attendance>,
+{
+    let mut offset = 0;
+    while offset + chunk_size <= data.len() {
+        let chunk = &data[offset..offset + chunk_size];
+        out.push(parse_chunk(chunk)?);
+        offset += record_size;
+    }
+    Ok(())
+}
+
 /// Parse attendance records in 8-byte format.
 /// Layout: uid(u16) + status(u8) + time(u32) + punch(u8)
 fn parse_records_8(
@@ -299,14 +333,10 @@ fn parse_records_8(
     record_size: usize,
     out: &mut Vec<Attendance>,
     uid_cache: &mut HashMap<u32, String>,
-    zk: &mut ZK,
+    device_cache: &HashMap<u16, String>,
     tz_offset: i32,
 ) -> ZKResult<()> {
-    let chunk_size = ATT_RECORD_SIZE_8;
-    let mut offset = 0;
-
-    while offset + chunk_size <= data.len() {
-        let chunk = &data[offset..offset + chunk_size];
+    parse_records_with(data, record_size, ATT_RECORD_SIZE_8, out, |chunk| {
         let mut rdr = io::Cursor::new(chunk);
         let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
         let status = rdr.read_u8()?;
@@ -316,17 +346,16 @@ fn parse_records_8(
 
         let timestamp = ZK::decode_time(&time_bytes)?;
         let user_id = uid_cache.get(&(uid as u32)).cloned().unwrap_or_else(|| {
-            let id = zk.get_user_id_from_cache(uid);
+            let id = device_cache
+                .get(&uid)
+                .cloned()
+                .unwrap_or_else(|| uid.to_string());
             uid_cache.insert(uid as u32, id.clone());
             id
         });
 
-        out.push(Attendance::new(
-            uid as u32, user_id, timestamp, status, punch, tz_offset,
-        ));
-        offset += record_size;
-    }
-    Ok(())
+        Ok(Attendance::new(uid as u32, user_id, timestamp, status, punch, tz_offset))
+    })
 }
 
 /// Parse attendance records in 16-byte format.
@@ -338,11 +367,7 @@ fn parse_records_16(
     uid_cache: &mut HashMap<u32, String>,
     tz_offset: i32,
 ) -> ZKResult<()> {
-    let chunk_size = ATT_RECORD_SIZE_16;
-    let mut offset = 0;
-
-    while offset + chunk_size <= data.len() {
-        let chunk = &data[offset..offset + chunk_size];
+    parse_records_with(data, record_size, ATT_RECORD_SIZE_16, out, |chunk| {
         let mut rdr = io::Cursor::new(chunk);
         let user_id_num = rdr.read_u32::<byteorder::LittleEndian>()?;
         let mut time_bytes = [0u8; 4];
@@ -357,17 +382,8 @@ fn parse_records_16(
             id
         });
 
-        out.push(Attendance::new(
-            user_id_num,
-            user_id,
-            timestamp,
-            status,
-            punch,
-            tz_offset,
-        ));
-        offset += record_size;
-    }
-    Ok(())
+        Ok(Attendance::new(user_id_num, user_id, timestamp, status, punch, tz_offset))
+    })
 }
 
 /// Parse attendance records in 40-byte format.
@@ -395,27 +411,27 @@ fn parse_records_40(
             }
         }
 
-        let mut rdr = io::Cursor::new(chunk_ptr);
-        let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
-        let mut user_id_bytes = [0u8; 24];
-        rdr.read_exact(&mut user_id_bytes)?;
-        let status = rdr.read_u8()?;
-        let mut time_bytes = [0u8; 4];
-        rdr.read_exact(&mut time_bytes)?;
-        let punch = rdr.read_u8()?;
+        parse_records_with(chunk_ptr, 0, chunk_ptr.len(), out, |full_chunk| {
+            let mut rdr = io::Cursor::new(full_chunk);
+            let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
+            let mut user_id_bytes = [0u8; 24];
+            rdr.read_exact(&mut user_id_bytes)?;
+            let status = rdr.read_u8()?;
+            let mut time_bytes = [0u8; 4];
+            rdr.read_exact(&mut time_bytes)?;
+            let punch = rdr.read_u8()?;
 
-        let timestamp = ZK::decode_time(&time_bytes)?;
-        let user_id = bytes_cache.get(&user_id_bytes).cloned().unwrap_or_else(|| {
-            let id = String::from_utf8_lossy(&user_id_bytes)
-                .trim_matches('\0')
-                .to_string();
-            bytes_cache.insert(user_id_bytes, id.clone());
-            id
-        });
+            let timestamp = ZK::decode_time(&time_bytes)?;
+            let user_id = bytes_cache.get(&user_id_bytes).cloned().unwrap_or_else(|| {
+                let id = String::from_utf8_lossy(&user_id_bytes)
+                    .trim_matches('\0')
+                    .to_string();
+                bytes_cache.insert(user_id_bytes, id.clone());
+                id
+            });
 
-        out.push(Attendance::new(
-            uid as u32, user_id, timestamp, status, punch, tz_offset,
-        ));
+            Ok(Attendance::new(uid as u32, user_id, timestamp, status, punch, tz_offset))
+        })?;
         offset += record_size;
     }
     Ok(())
@@ -499,5 +515,90 @@ mod tests {
             err,
             ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, _)
         ));
+    }
+
+    // ── parse_records_with tests ───────────────────────────────────────
+
+    /// Stub: create a minimal 8-byte attendance record for parse_records_with tests.
+    fn make_stub_record(uid: u16, status: u8, punch: u8) -> Vec<u8> {
+        use byteorder::LittleEndian;
+        let mut buf = Vec::with_capacity(8);
+        buf.write_u16::<LittleEndian>(uid).unwrap();
+        buf.push(status);
+        // Time bytes: encode a valid timestamp (2025-01-01 00:00:00)
+        // encode_time((25*12*31 + 0*31 + 0)*86400 + 0) = (9300)*86400 = 803520000
+        let t: u32 = 803520000;
+        buf.write_u32::<LittleEndian>(t).unwrap();
+        buf.push(punch);
+        buf
+    }
+
+    #[test]
+    fn test_parse_records_with_single_record() {
+        let data = make_stub_record(101, 1, 0);
+        let mut out = Vec::new();
+        parse_records_with(&data, 8, 8, &mut out, |chunk| {
+            let mut rdr = std::io::Cursor::new(chunk);
+            let uid = rdr.read_u16::<byteorder::LittleEndian>().unwrap() as u32;
+            Ok(Attendance::new(uid, uid.to_string(),
+                chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
+                    .and_hms_opt(0, 0, 0).unwrap(),
+                1, 0, 420))
+        }).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].uid(), 101);
+    }
+
+    #[test]
+    fn test_parse_records_with_record_size_larger_than_chunk() {
+        // Simulate records with padding: record_size=10 but chunk_size=8
+        let rec1 = make_stub_record(1, 1, 0);
+        let rec2 = make_stub_record(2, 1, 0);
+        // Add 2 bytes padding per record
+        let mut data = Vec::new();
+        data.extend_from_slice(&rec1);
+        data.extend_from_slice(&[0, 0]); // padding
+        data.extend_from_slice(&rec2);
+        data.extend_from_slice(&[0, 0]); // padding
+        let mut out = Vec::new();
+        parse_records_with(&data, 10, 8, &mut out, |chunk| {
+            let uid = chunk[0] as u32 + ((chunk[1] as u32) << 8);
+            Ok(Attendance::new(uid, uid.to_string(),
+                chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
+                    .and_hms_opt(0, 0, 0).unwrap(),
+                1, 0, 420))
+        }).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].uid(), 1);
+        assert_eq!(out[1].uid(), 2);
+    }
+
+    #[test]
+    fn test_parse_records_with_empty_data() {
+        let mut out = Vec::new();
+        parse_records_with(&[], 8, 8, &mut out, |_chunk| {
+            unreachable!()
+        }).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_parse_records_with_data_smaller_than_chunk() {
+        // Data smaller than chunk_size → no iterations
+        let mut out = Vec::new();
+        parse_records_with(&[1, 2, 3], 8, 8, &mut out, |_chunk| {
+            unreachable!()
+        }).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_parse_records_with_propagates_error() {
+        let data = make_stub_record(1, 1, 0);
+        let mut out = Vec::new();
+        let err = parse_records_with(&data, 8, 8, &mut out, |_chunk| {
+            Err(ZKError::Response(ZKErrorCode::Other, "test error".into()))
+        }).unwrap_err();
+        assert!(matches!(err, ZKError::Response(ZKErrorCode::Other, _)));
     }
 }

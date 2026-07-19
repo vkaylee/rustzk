@@ -12,41 +12,66 @@ use std::io::{self, Cursor};
 ///
 /// For packet-level checksums, prefer [`ZKPacket::new`] or [`ZKPacket::new_with_legacy`].
 pub fn calculate_checksum(data: &[u8]) -> u16 {
-    let mut checksum: u32 = 0;
+    let mut sum: u32 = 0;
+    if data.len() >= 8 {
+        // Sum bytes 0-1 (command) and bytes 4+ (session_id, reply_id, payload),
+        // skipping bytes 2-3 which hold the checksum field itself.
+        sum = sum.wrapping_add(sum_u16_pairs(&data[..2]));
+        sum = sum.wrapping_add(sum_u16_pairs(&data[4..]));
+    } else {
+        sum = sum.wrapping_add(sum_u16_pairs(data));
+    }
+    finalize_checksum(sum)
+}
+
+/// Sum a byte slice as little-endian u16 pairs, wrapping at `USHRT_MAX`.
+/// Used internally by checksum calculation functions.
+fn sum_u16_pairs(data: &[u8]) -> u32 {
+    let mut sum: u32 = 0;
     let mut i = 0;
     let len = data.len();
-
     while i + 1 < len {
-        // Skip checksum field (bytes 2-3) if the slice represents a packet header
-        if len >= 8 && i == 2 {
-            i += 2;
-            continue;
-        }
         let val = u16::from_le_bytes([data[i], data[i + 1]]);
-        checksum += val as u32;
-        if checksum > USHRT_MAX as u32 {
-            checksum -= USHRT_MAX as u32;
+        sum += val as u32;
+        if sum > USHRT_MAX as u32 {
+            sum -= USHRT_MAX as u32;
         }
         i += 2;
     }
-
     if i < len {
-        checksum += data[i] as u32;
-        if checksum > USHRT_MAX as u32 {
-            checksum -= USHRT_MAX as u32;
+        sum += data[i] as u32;
+        if sum > USHRT_MAX as u32 {
+            sum -= USHRT_MAX as u32;
         }
     }
-
-    while checksum > USHRT_MAX as u32 {
-        checksum -= USHRT_MAX as u32;
+    while sum > USHRT_MAX as u32 {
+        sum -= USHRT_MAX as u32;
     }
+    sum
+}
 
-    let mut checksum = !(checksum as i32);
+/// Default checksum finalization: signed negation (Python pyzk-compatible).
+///
+/// Python's `~x` on a signed int gives `-(x+1)`, which after adding 65535
+/// yields `65534 - x`. This differs by exactly 1 from the legacy approach.
+fn finalize_checksum(sum: u32) -> u16 {
+    let mut checksum = !(sum as i32);
     while checksum < 0 {
         checksum += USHRT_MAX as i32;
     }
-
     checksum as u16
+}
+
+/// Legacy checksum finalization: Rust's native unsigned bitwise NOT on u16.
+///
+/// `!(sum as u16) = 65535 - sum`. Produces a checksum exactly **1 greater**
+/// than [`finalize_checksum`] for all inputs. Required by older firmware
+/// (e.g., ZAM180_TFT) that strictly validates checksums.
+fn finalize_checksum_legacy(mut sum: u32) -> u16 {
+    while sum > USHRT_MAX as u32 {
+        sum -= USHRT_MAX as u32;
+    }
+    !(sum as u16)
 }
 
 /// Represents a ZK protocol packet.
@@ -166,41 +191,10 @@ impl<'a> ZKPacket<'a> {
     }
 
     fn calculate_checksum(&self) -> u16 {
-        let mut sum: u32 = 0;
-
-        // Sum the header fields (excluding the checksum field itself)
-        sum += self.command as u32;
-        sum += self.session_id as u32;
-        sum += self.reply_id as u32;
-
-        // Sum the payload bytes as u16 pairs
-        let mut i = 0;
-        let payload_len = self.payload.len();
-        while i + 1 < payload_len {
-            let val = u16::from_le_bytes([self.payload[i], self.payload[i + 1]]);
-            sum += val as u32;
-            if sum > USHRT_MAX as u32 {
-                sum -= USHRT_MAX as u32;
-            }
-            i += 2;
-        }
-
-        if i < payload_len {
-            sum += self.payload[i] as u32;
-            if sum > USHRT_MAX as u32 {
-                sum -= USHRT_MAX as u32;
-            }
-        }
-
-        // Final step: signed negation (Python pyzk-compatible).
-        // Python: ~sum produces -(sum+1), then adding 65535 gives (65534 - sum).
-        // This differs by exactly 1 from the legacy u16 NOT approach (65535 - sum).
-        let mut checksum = !(sum as i32);
-        while checksum < 0 {
-            checksum += USHRT_MAX as i32;
-        }
-
-        checksum as u16
+        // Sum header fields (excluding checksum field itself) + payload bytes
+        let mut sum = self.command as u32 + self.session_id as u32 + self.reply_id as u32;
+        sum = sum.wrapping_add(sum_u16_pairs(&self.payload));
+        finalize_checksum(sum)
     }
 
     /// Legacy checksum algorithm (v0.4.4 and earlier).
@@ -215,35 +209,9 @@ impl<'a> ZKPacket<'a> {
     /// difference causes some firmware (e.g., ZAM180) to reject packets that
     /// use the default algorithm.
     fn calculate_checksum_legacy(&self) -> u16 {
-        let mut sum: u32 = 0;
-
-        sum += self.command as u32;
-        sum += self.session_id as u32;
-        sum += self.reply_id as u32;
-
-        let mut i = 0;
-        let payload_len = self.payload.len();
-        while i + 1 < payload_len {
-            let val = u16::from_le_bytes([self.payload[i], self.payload[i + 1]]);
-            sum += val as u32;
-            if sum > USHRT_MAX as u32 {
-                sum -= USHRT_MAX as u32;
-            }
-            i += 2;
-        }
-
-        if i < payload_len {
-            sum += self.payload[i] as u32;
-            if sum > USHRT_MAX as u32 {
-                sum -= USHRT_MAX as u32;
-            }
-        }
-
-        while sum > USHRT_MAX as u32 {
-            sum -= USHRT_MAX as u32;
-        }
-
-        !(sum as u16)
+        let mut sum = self.command as u32 + self.session_id as u32 + self.reply_id as u32;
+        sum = sum.wrapping_add(sum_u16_pairs(&self.payload));
+        finalize_checksum_legacy(sum)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -418,5 +386,102 @@ mod tests {
         let (unwrapped, total_len) = TCPWrapper::unwrap(&wrapped).unwrap();
         assert_eq!(unwrapped, packet);
         assert_eq!(total_len, 10);
+    }
+
+    // ── Unit tests for checksum helpers ─────────────────────────────────
+
+    #[test]
+    fn test_sum_u16_pairs_empty() {
+        assert_eq!(sum_u16_pairs(&[]), 0);
+    }
+
+    #[test]
+    fn test_sum_u16_pairs_single_byte() {
+        // Single byte 0x42 → 66
+        assert_eq!(sum_u16_pairs(&[0x42]), 66);
+    }
+
+    #[test]
+    fn test_sum_u16_pairs_even_aligned() {
+        // Two bytes: [0x01, 0x02] → u16 LE = 0x0201 = 513
+        assert_eq!(sum_u16_pairs(&[0x01, 0x02]), 513);
+    }
+
+    #[test]
+    fn test_sum_u16_pairs_odd_length() {
+        // [0x01, 0x00, 0xFF] → u16 pair (0x0001=1) + single byte (0xFF=255) = 256
+        assert_eq!(sum_u16_pairs(&[0x01, 0x00, 0xFF]), 256);
+    }
+
+    #[test]
+    fn test_sum_u16_pairs_overflow_wraps_at_ushrt_max() {
+        // Two u16 pairs: 65535 + 1 = 65536, should wrap to 1
+        let data = [0xFF, 0xFF, 0x01, 0x00]; // 65535 + 1
+        assert_eq!(sum_u16_pairs(&data), 1);
+    }
+
+    #[test]
+    fn test_sum_u16_pairs_multi_overflow() {
+        // 65535 + 65535 + 65535 = 196605
+        // After first add: 65535, no wrap (65535 ≤ 65535)
+        // After second: 65535 + 65535 = 131070 → 131070 - 65535 = 65535
+        // After third: 65535 + 65535 = 131070 → 131070 - 65535 = 65535
+        // Then while > USHRT_MAX: 65535 ≤ 65535, done
+        // Result: 65535
+        let data = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        assert_eq!(sum_u16_pairs(&data), 65535);
+    }
+
+    #[test]
+    fn test_finalize_checksum_zero_sum() {
+        // sum=0 → !(0 as i32) = -1 → -1 + 65535 = 65534
+        assert_eq!(finalize_checksum(0), 0xFFFE);
+    }
+
+    #[test]
+    fn test_finalize_checksum_ushrt_max() {
+        // sum=65535 → !(65535 as i32) = -65536 → -65536 + 65535 = -1 → +65535 = 65534
+        assert_eq!(finalize_checksum(65535), 0xFFFE);
+    }
+
+    #[test]
+    fn test_finalize_checksum_legacy_wraps_before_not() {
+        // sum=66534 > USHRT_MAX, legacy must wrap first:
+        // 66534 - 65535 = 999, then !(999 as u16) = 65535 - 999 = 64536 (0xFC18)
+        assert_eq!(finalize_checksum_legacy(66534), 0xFC18);
+    }
+
+    #[test]
+    fn test_finalize_legacy_at_boundary() {
+        // sum=65535 → no wrap needed, !(65535 as u16) = 0
+        assert_eq!(finalize_checksum_legacy(65535), 0);
+    }
+
+    #[test]
+    fn test_both_finalizers_differ_by_one() {
+        // The "differ by one" property holds for all sums except exact multiples
+        // of USHRT_MAX (where the wrap-to-zero edge case causes a difference of 2).
+        for sum in [0u32, 1, 100, 999, 65534, 65536] {
+            let default = finalize_checksum(sum);
+            let legacy = finalize_checksum_legacy(sum);
+            assert_eq!(
+                legacy.wrapping_sub(default),
+                1,
+                "sum={}: default={:#06X}, legacy={:#06X}",
+                sum, default, legacy
+            );
+        }
+    }
+
+    #[test]
+    fn test_finalizers_at_multiple_of_ushrt_max() {
+        // At exact multiples of USHRT_MAX, both algorithms agree after wrapping
+        // but the difference is 2 due to the wrap-to-zero edge case.
+        for sum in [65535u32, 131070] {
+            let default = finalize_checksum(sum);
+            let legacy = finalize_checksum_legacy(sum);
+            assert_eq!(legacy.wrapping_sub(default), 2,
+                "sum={}: default={:#06X}, legacy={:#06X}", sum, default, legacy);
+        }
     }
 }
