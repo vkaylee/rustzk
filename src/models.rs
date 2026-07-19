@@ -484,6 +484,20 @@ impl Finger {
     pub fn template(&self) -> &[u8] {
         &self.template
     }
+
+    /// Serializes the finger into the `fpack` block used by `save_user_template`.
+    ///
+    /// Layout: `[u16 size][template bytes]`, where `size = template.len() + 6`
+    /// (the size field counts the notional 6-byte record header even though this
+    /// form emits only the 2-byte prefix). Mirrors the record parsed in
+    /// `ZK::get_templates`.
+    pub fn repack_only(&self) -> Vec<u8> {
+        let size = (self.template.len() + 6) as u16;
+        let mut out = Vec::with_capacity(2 + self.template.len());
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&self.template);
+        out
+    }
 }
 
 impl fmt::Display for Finger {
@@ -783,5 +797,27 @@ mod tests {
         let a = Finger::new(1, 0, 1, vec![0xAA]);
         let b = Finger::new(1, 0, 1, vec![0xBB]);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_finger_repack_only() {
+        let template = vec![0xAA, 0xBB, 0xCC];
+        let finger = Finger::new(1, 0, 1, template.clone());
+        let out = finger.repack_only();
+
+        // Layout: [u16 size][template], size = template.len() + 6.
+        assert_eq!(out.len(), 2 + template.len());
+        assert_eq!(u16::from_le_bytes([out[0], out[1]]), (3 + 6) as u16);
+        assert_eq!(&out[2..], &template[..]);
+    }
+
+    #[test]
+    fn test_finger_repack_only_empty_template() {
+        let finger = Finger::new(1, 0, 1, Vec::new());
+        let out = finger.repack_only();
+
+        // Even with no template bytes, size still counts the notional 6-byte header.
+        assert_eq!(out.len(), 2);
+        assert_eq!(u16::from_le_bytes([out[0], out[1]]), 6);
     }
 }

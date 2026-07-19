@@ -306,6 +306,93 @@ impl ZK {
         }
     }
 
+    /// Uploads fingerprint templates for a user to the device.
+    ///
+    /// This is the write-direction counterpart to [`get_templates`](Self::get_templates):
+    /// it stages a combined user + template buffer via the PREPARE_DATA / DATA
+    /// handshake and then commits it with `_CMD_SAVE_USERTEMPS`.
+    ///
+    /// The `user` should already exist on the device (or be created via
+    /// [`set_user`](Self::set_user)); `fingers` carries the templates to store,
+    /// each identified by its finger ID (0-9).
+    pub fn save_user_template(&mut self, user: &User, fingers: &[Finger]) -> ZKResult<()> {
+        if fingers.is_empty() {
+            return Ok(());
+        }
+
+        // User record, sized to match the device's active packet layout.
+        let upack = if self.config.user_packet_size == USER_PACKET_SIZE_SMALL {
+            user.to_bytes_small()?
+        } else {
+            user.to_bytes_large()?
+        };
+
+        // Build the finger table and concatenated template blob.
+        // Table entry (8 bytes): [u8 flag=2][u16 uid][u8 (0x10 | fid)][u32 offset]
+        // where `offset` is the running byte position of this finger inside `fpack`.
+        const FINGER_FLAG: u8 = 0x10;
+        let mut table = Vec::with_capacity(fingers.len() * 8);
+        let mut fpack = Vec::new();
+        let mut offset: u32 = 0;
+
+        for finger in fingers {
+            let tfp = finger.repack_only();
+            table.push(2u8);
+            let mut uid_bytes = [0u8; 2];
+            LittleEndian::write_u16(&mut uid_bytes, user.uid());
+            table.extend_from_slice(&uid_bytes);
+            table.push(FINGER_FLAG | finger.fid());
+            let mut off_bytes = [0u8; 4];
+            LittleEndian::write_u32(&mut off_bytes, offset);
+            table.extend_from_slice(&off_bytes);
+
+            offset = offset
+                .checked_add(tfp.len() as u32)
+                .ok_or_else(|| {
+                    ZKError::InvalidData(
+                        ZKErrorCode::BufferOverflow,
+                        "Total template size exceeds u32 range".into(),
+                    )
+                })?;
+            fpack.extend_from_slice(&tfp);
+        }
+
+        // Header: [u32 upack_len][u32 table_len][u32 fpack_len]
+        let mut packet = Vec::with_capacity(12 + upack.len() + table.len() + fpack.len());
+        let mut head = [0u8; 12];
+        LittleEndian::write_u32(&mut head[0..4], upack.len() as u32);
+        LittleEndian::write_u32(&mut head[4..8], table.len() as u32);
+        LittleEndian::write_u32(&mut head[8..12], fpack.len() as u32);
+        packet.extend_from_slice(&head);
+        packet.extend_from_slice(&upack);
+        packet.extend_from_slice(&table);
+        packet.extend_from_slice(&fpack);
+
+        // Stage the buffer, then commit with the template-save command.
+        self.send_with_buffer(&packet)?;
+
+        // Commit payload: pack('<IHH', 12, 0, 8) = [u32 12][u16 0][u16 8]
+        let mut commit = [0u8; 8];
+        LittleEndian::write_u32(&mut commit[0..4], 12);
+        LittleEndian::write_u16(&mut commit[4..6], 0);
+        LittleEndian::write_u16(&mut commit[6..8], 8);
+        let res = self.send_command(_CMD_SAVE_USERTEMPS, &commit)?;
+        if res.command() != CMD_ACK_OK {
+            return Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                "Failed to save user template".into(),
+            ));
+        }
+
+        if let Err(e) = self.refresh_data() {
+            log::warn!(
+                "Failed to refresh device data after save_user_template: {}",
+                e
+            );
+        }
+        Ok(())
+    }
+
     /// Finds a user on the device by their alphanumeric User ID.
     pub fn find_user_by_id(&mut self, user_id: &str) -> ZKResult<Option<User>> {
         let users = self.get_users()?;

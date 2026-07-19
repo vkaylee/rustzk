@@ -48,6 +48,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("No fingerprints found.");
     }
 
+    // 2. Optionally re-upload the first template back to its user.
+    // Guarded by an env flag so a plain read-only run never writes to the device.
+    if std::env::var("ZK_DEMO_SAVE").is_ok() {
+        if let Some(template) = templates.first() {
+            let uid = template.uid();
+            println!(
+                "
+ZK_DEMO_SAVE set: re-uploading template for UID {}...",
+                uid
+            );
+
+            let users = zk.get_users()?;
+            match users.into_iter().find(|u| u.uid() == uid) {
+                Some(user) => {
+                    zk.save_user_template(&user, std::slice::from_ref(template))?;
+                    println!("Template uploaded successfully.");
+                }
+                None => println!("No user found with UID {}, skipping upload.", uid),
+            }
+        }
+    }
+
     zk.disconnect()?;
     Ok(())
 }

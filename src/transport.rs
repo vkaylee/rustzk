@@ -444,6 +444,49 @@ impl ZK {
         Ok(data)
     }
 
+    /// Upload a buffer to the device using the PREPARE_DATA / DATA handshake.
+    ///
+    /// This is the write-direction counterpart to [`read_with_buffer`]: the host
+    /// announces the total size via `CMD_PREPARE_DATA`, then pushes the body in
+    /// `CMD_DATA` chunks. The caller is responsible for issuing the subsequent
+    /// commit command (e.g. `_CMD_SAVE_USERTEMPS`) that persists the staged data.
+    ///
+    /// Chunk size is fixed at 1024 bytes to match the reference firmware behaviour
+    /// for template uploads (do not reuse the larger download chunk sizes).
+    pub(crate) fn send_with_buffer(&mut self, buffer: &[u8]) -> ZKResult<()> {
+        const UPLOAD_CHUNK: usize = 1024;
+
+        // Clear any stale device buffer before staging new data.
+        let _ = self.send_command(CMD_FREE_DATA, &[]);
+
+        // Announce the total size.
+        let mut size_payload = [0u8; 4];
+        LittleEndian::write_u32(&mut size_payload, buffer.len() as u32);
+        let res = self.send_command(CMD_PREPARE_DATA, &size_payload)?;
+        if res.command() != CMD_ACK_OK {
+            return Err(ZKError::Response(
+                ZKErrorCode::ProtocolViolation,
+                format!(
+                    "Device rejected PREPARE_DATA for upload: 0x{:X}",
+                    res.command()
+                ),
+            ));
+        }
+
+        // Stream the body in fixed-size chunks.
+        for chunk in buffer.chunks(UPLOAD_CHUNK) {
+            let res = self.send_command(CMD_DATA, chunk)?;
+            if res.command() != CMD_ACK_OK {
+                return Err(ZKError::Response(
+                    ZKErrorCode::ProtocolViolation,
+                    format!("Device rejected DATA chunk during upload: 0x{:X}", res.command()),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn connect(&mut self, protocol: ZKProtocol) -> ZKResult<()> {
         if self.connection.is_connected {
             return Err(ZKError::Connection(
