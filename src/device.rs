@@ -1,8 +1,14 @@
-use byteorder::{ByteOrder, LittleEndian};
+use byteorder::ByteOrder;
 use chrono::{DateTime, FixedOffset, TimeZone};
 
 use crate::constants::*;
 use crate::{ZKError, ZKErrorCode, ZKResult, ZK};
+
+/// Read a 4-byte little-endian i32 from `data` at the given byte offset.
+#[inline]
+fn read_sizes_field(data: &[u8], offset: usize) -> i32 {
+    byteorder::LittleEndian::read_i32(&data[offset..offset + SIZES_FIELD_LEN])
+}
 
 impl ZK {
     /// Fetches device capacity and usage statistics.
@@ -10,7 +16,9 @@ impl ZK {
         let mut res = self.send_command(CMD_GET_FREE_SIZES, &[])?;
 
         // Handle case where device sends ACK_OK then ACK_DATA/Response separately
-        if res.command() == CMD_ACK_OK && res.payload().len() < 16 {
+        if res.command() == CMD_ACK_OK
+            && res.payload().len() < SIZES_ACK_FALLBACK_MIN
+        {
             // Try reading the next packet which should contain the actual data
             match self.read_response_safe() {
                 Ok(next_packet) => {
@@ -27,27 +35,30 @@ impl ZK {
 
         if res.command() == CMD_ACK_OK || res.command() == CMD_ACK_DATA {
             let data = res.payload();
-            if data.len() >= 80 {
-                self.users = LittleEndian::read_i32(&data[16..20]).max(0) as u32;
-                self.fingers = LittleEndian::read_i32(&data[24..28]).max(0) as u32;
-                self.records = LittleEndian::read_i32(&data[32..36]).max(0) as u32;
-                self.cards = LittleEndian::read_i32(&data[48..52]);
-                self.fingers_cap = LittleEndian::read_i32(&data[56..60]);
-                self.users_cap = LittleEndian::read_i32(&data[60..64]);
-                self.rec_cap = LittleEndian::read_i32(&data[64..68]);
+            if data.len() >= SIZES_V2_MIN {
+                self.users = read_sizes_field(data, SIZES_V2_USERS).max(0) as u32;
+                self.fingers = read_sizes_field(data, SIZES_V2_FINGERS).max(0) as u32;
+                self.records = read_sizes_field(data, SIZES_V2_RECORDS).max(0) as u32;
+                self.cards = read_sizes_field(data, SIZES_V2_CARDS);
+                self.fingers_cap = read_sizes_field(data, SIZES_V2_FINGERS_CAP);
+                self.users_cap = read_sizes_field(data, SIZES_V2_USERS_CAP);
+                self.rec_cap = read_sizes_field(data, SIZES_V2_REC_CAP);
 
-                if data.len() >= 92 {
-                    self.faces = LittleEndian::read_i32(&data[80..84]).max(0) as u32;
-                    self.faces_cap = LittleEndian::read_i32(&data[88..92]);
+                if data.len() >= SIZES_V2_EXT_MIN {
+                    self.faces =
+                        read_sizes_field(data, SIZES_V2_FACES).max(0) as u32;
+                    self.faces_cap = read_sizes_field(data, SIZES_V2_FACES_CAP);
                 }
-            } else if data.len() >= 28 {
+            } else if data.len() >= SIZES_V1_MIN {
                 // Older firmware formats
-                self.users = LittleEndian::read_i32(&data[0..4]).max(0) as u32;
-                self.fingers = LittleEndian::read_i32(&data[4..8]).max(0) as u32;
-                self.records = LittleEndian::read_i32(&data[8..12]).max(0) as u32;
-                self.users_cap = LittleEndian::read_i32(&data[12..16]);
-                self.fingers_cap = LittleEndian::read_i32(&data[16..20]);
-                self.rec_cap = LittleEndian::read_i32(&data[20..24]);
+                self.users = read_sizes_field(data, SIZES_V1_USERS).max(0) as u32;
+                self.fingers =
+                    read_sizes_field(data, SIZES_V1_FINGERS).max(0) as u32;
+                self.records =
+                    read_sizes_field(data, SIZES_V1_RECORDS).max(0) as u32;
+                self.users_cap = read_sizes_field(data, SIZES_V1_USERS_CAP);
+                self.fingers_cap = read_sizes_field(data, SIZES_V1_FINGERS_CAP);
+                self.rec_cap = read_sizes_field(data, SIZES_V1_REC_CAP);
             }
             let _ = self.sync_timezone();
             Ok(())

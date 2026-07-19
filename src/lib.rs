@@ -335,8 +335,6 @@ impl Drop for ZK {
     }
 }
 
-pub mod validation;
-
 #[cfg(test)]
 mod tests {
     use super::*;

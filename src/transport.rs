@@ -1,4 +1,4 @@
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian};
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::Duration;
@@ -224,14 +224,9 @@ impl ZK {
         match transport {
             ZKTransport::Tcp(ref mut reader) => {
                 self.write_buf.clear();
-                self.write_buf
-                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_1)?;
-                self.write_buf
-                    .write_u16::<LittleEndian>(MACHINE_PREPARE_DATA_2)?;
-                self.write_buf
-                    .write_u32::<LittleEndian>((packet.payload().len() + 8) as u32)?;
                 packet.to_bytes_into(&mut self.write_buf)?;
-                reader.get_mut().write_all(&self.write_buf)?;
+                let framed = TCPWrapper::wrap(&self.write_buf);
+                reader.get_mut().write_all(&framed)?;
             }
             ZKTransport::Udp(ref mut socket) => {
                 self.write_buf.clear();
@@ -240,6 +235,14 @@ impl ZK {
             }
         }
         Ok(())
+    }
+
+    /// Increment and wrap the reply ID for the next command-response cycle.
+    fn increment_reply_id(&mut self) {
+        self.reply_id = self.reply_id.wrapping_add(1);
+        if self.reply_id == USHRT_MAX {
+            self.reply_id -= USHRT_MAX;
+        }
     }
 
     pub(crate) fn send_command(
@@ -254,10 +257,7 @@ impl ZK {
             ));
         }
 
-        self.reply_id = self.reply_id.wrapping_add(1);
-        if self.reply_id == USHRT_MAX {
-            self.reply_id -= USHRT_MAX;
-        }
+        self.increment_reply_id();
 
         log::debug!(
             "Sending Command: {} (0x{:X}), Reply ID: {}",

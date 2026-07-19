@@ -130,3 +130,39 @@ pub const ATT_RECORD_SIZE_40: usize = 40;
 pub const EVENT_DATA_LEN_10: usize = 10;
 pub const EVENT_DATA_LEN_12: usize = 12;
 pub const EVENT_DATA_LEN_32: usize = 32;
+
+// ── read_sizes() payload field offsets ────────────────────────────────────
+//
+// V2 firmware format (payload >= 80 bytes). Each field is a 4-byte LE i32.
+pub const SIZES_V2_USERS: usize = 16;
+pub const SIZES_V2_FINGERS: usize = 24;
+pub const SIZES_V2_RECORDS: usize = 32;
+pub const SIZES_V2_CARDS: usize = 48;
+pub const SIZES_V2_FINGERS_CAP: usize = 56;
+pub const SIZES_V2_USERS_CAP: usize = 60;
+pub const SIZES_V2_REC_CAP: usize = 64;
+pub const SIZES_V2_FACES: usize = 80;
+pub const SIZES_V2_FACES_CAP: usize = 88;
+
+/// Minimum payload length for V2 extended format (includes faces).
+pub const SIZES_V2_EXT_MIN: usize = 92;
+
+/// Minimum payload length for V2 base format (users through rec_cap).
+pub const SIZES_V2_MIN: usize = 80;
+
+// V1 firmware format (28 <= payload < 80 bytes). Each field is a 4-byte LE i32.
+pub const SIZES_V1_USERS: usize = 0;
+pub const SIZES_V1_FINGERS: usize = 4;
+pub const SIZES_V1_RECORDS: usize = 8;
+pub const SIZES_V1_USERS_CAP: usize = 12;
+pub const SIZES_V1_FINGERS_CAP: usize = 16;
+pub const SIZES_V1_REC_CAP: usize = 20;
+
+/// Minimum payload length for V1 format.
+pub const SIZES_V1_MIN: usize = 28;
+
+/// Minimum payload size for ACK_OK data fallback in read_sizes().
+pub const SIZES_ACK_FALLBACK_MIN: usize = 16;
+
+/// Size of each device info field (i32 = 4 bytes).
+pub const SIZES_FIELD_LEN: usize = 4;
