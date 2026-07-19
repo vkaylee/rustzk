@@ -39,7 +39,7 @@ fn test_protocol_header_validation() {
     // Header claiming excessive size - test with environment override
     let _lock = env_lock().lock().unwrap();
     std::env::set_var("RUSTZK_MAX_PACKET_SIZE", "32768"); // Set to 32KB for this test
-    // 65535 exceeds our 32KB test limit
+                                                          // 65535 exceeds our 32KB test limit
     assert!(security::validate_packet_size(65535).is_err());
     std::env::remove_var("RUSTZK_MAX_PACKET_SIZE"); // Clean up
 }

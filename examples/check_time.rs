@@ -1,18 +1,8 @@
 use chrono::Local;
 use rustzk::{ZKProtocol, ZK};
-use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
-    let (ip, port) = if args.len() >= 3 {
-        (args[1].clone(), args[2].parse().unwrap_or(4370))
-    } else if args.len() == 2 {
-        (args[1].clone(), 4370)
-    } else {
-        eprintln!("Usage: {} <ip> [port]", args[0]);
-        eprintln!("Example: {} 192.168.1.201 4370", args[0]);
-        std::process::exit(1);
-    };
+    let (ip, port) = rustzk::parse_ip_port();
 
     println!("=== ZK Time Checker ===");
     println!("Connecting to {}:{}...", ip, port);

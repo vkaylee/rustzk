@@ -4,20 +4,9 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use rustzk::{ZKProtocol, ZK};
-use std::env;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <ip> [port]", args[0]);
-        std::process::exit(1);
-    }
-    let ip = args[1].clone();
-    let port = if args.len() > 2 {
-        args[2].parse().unwrap_or(4370)
-    } else {
-        4370
-    };
+    let (ip, port) = rustzk::parse_ip_port();
 
     println!("Connecting to ZK device at {}:{}...", ip, port);
 

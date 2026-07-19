@@ -468,7 +468,9 @@ mod tests {
                 legacy.wrapping_sub(default),
                 1,
                 "sum={}: default={:#06X}, legacy={:#06X}",
-                sum, default, legacy
+                sum,
+                default,
+                legacy
             );
         }
     }
@@ -480,8 +482,14 @@ mod tests {
         for sum in [65535u32, 131070] {
             let default = finalize_checksum(sum);
             let legacy = finalize_checksum_legacy(sum);
-            assert_eq!(legacy.wrapping_sub(default), 2,
-                "sum={}: default={:#06X}, legacy={:#06X}", sum, default, legacy);
+            assert_eq!(
+                legacy.wrapping_sub(default),
+                2,
+                "sum={}: default={:#06X}, legacy={:#06X}",
+                sum,
+                default,
+                legacy
+            );
         }
     }
 }

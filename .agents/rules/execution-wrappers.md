@@ -13,6 +13,8 @@ You MUST use the provided wrapper script `./cargo.sh` located in the root direct
 | Action / Tool | ❌ INCORRECT (DO NOT USE) | ✅ CORRECT (MUST USE) |
 |---|---|---|
 | **Rust / Cargo** | `cargo test`, `cargo build`, `cargo check` | `./cargo.sh test`, `./cargo.sh build`, `./cargo.sh check` |
+| **Full CI Pipeline** | `./cargo.sh test` (unit tests only, skips integration + lint) | `./leedevkit test rust` (unit + integration + lint) |
+| **Quick check** | `cargo check`, `cargo clippy`, `cargo fmt` | `./cargo.sh check`, `./cargo.sh clippy`, `./cargo.sh fmt` |
 
 ## ⚠️ PTY Safety & Redirection (MANDATORY)
 When running commands asynchronously in the background, you **MUST ALWAYS** redirect the output to a log file to prevent PTY hangs.

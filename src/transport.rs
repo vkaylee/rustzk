@@ -588,9 +588,8 @@ fn read_tcp_frame(reader: &mut std::io::BufReader<TcpStream>) -> ZKResult<ZKPack
         header[n..8].copy_from_slice(&rest);
     }
 
-    let (length, _) = TCPWrapper::decode_header(&header).map_err(|e| {
-        ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, e.to_string())
-    })?;
+    let (length, _) = TCPWrapper::decode_header(&header)
+        .map_err(|e| ZKError::InvalidData(ZKErrorCode::InvalidDataFormat, e.to_string()))?;
 
     crate::security::validate_packet_size(length)?;
 
@@ -599,7 +598,10 @@ fn read_tcp_frame(reader: &mut std::io::BufReader<TcpStream>) -> ZKResult<ZKPack
     if let Err(e) = reader.read_exact(&mut body) {
         return Err(ZKError::Network(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("TCP desync: failed to read body of size {}: {:?}", length, e),
+            format!(
+                "TCP desync: failed to read body of size {}: {:?}",
+                length, e
+            ),
         )));
     }
 

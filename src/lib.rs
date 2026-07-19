@@ -335,6 +335,45 @@ impl Drop for ZK {
     }
 }
 
+/// Convenience helper for examples and CLI tools: parse IP address and
+/// optional port from command-line arguments.
+///
+/// Returns `(ip, port)` using default port 4370 when none is given.
+/// Prints usage to stderr and exits with code 1 when arguments are missing.
+///
+/// # Example
+///
+/// ```no_run
+/// let (ip, port) = rustzk::parse_ip_port();
+/// let mut zk = rustzk::ZK::new(&ip, port);
+/// ```
+pub fn parse_ip_port() -> (String, u16) {
+    let args: Vec<String> = std::env::args().collect();
+    match parse_ip_port_from_args(&args) {
+        Ok(result) => result,
+        Err(msg) => {
+            eprintln!("{}", msg);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Pure parsing logic for `parse_ip_port`, separated so it can be unit-tested.
+/// Takes program arguments as a slice and returns either the parsed `(ip, port)`
+/// or an error message suitable for stderr.
+pub(crate) fn parse_ip_port_from_args(args: &[String]) -> Result<(String, u16), String> {
+    if args.len() < 2 {
+        return Err(format!("Usage: {} <ip> [port]", args[0]));
+    }
+    let ip = args[1].clone();
+    let port = if args.len() > 2 {
+        args[2].parse().unwrap_or(4370)
+    } else {
+        4370
+    };
+    Ok((ip, port))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,5 +442,45 @@ mod tests {
         assert_eq!(res, "12");
         assert!(zk.user_id_cache.is_some());
         assert!(zk.user_id_cache.as_ref().unwrap().is_empty());
+    }
+
+    // ── parse_ip_port_from_args tests ───────────────────────────────────
+
+    fn make_args(bin: &str, extra: &[&str]) -> Vec<String> {
+        let mut v = vec![bin.to_string()];
+        v.extend(extra.iter().map(|s| s.to_string()));
+        v
+    }
+
+    #[test]
+    fn test_parse_ip_only_default_port() {
+        let args = make_args("myapp", &["192.168.1.1"]);
+        let (ip, port) = parse_ip_port_from_args(&args).unwrap();
+        assert_eq!(ip, "192.168.1.1");
+        assert_eq!(port, 4370);
+    }
+
+    #[test]
+    fn test_parse_ip_with_port() {
+        let args = make_args("myapp", &["10.0.0.1", "3000"]);
+        let (ip, port) = parse_ip_port_from_args(&args).unwrap();
+        assert_eq!(ip, "10.0.0.1");
+        assert_eq!(port, 3000);
+    }
+
+    #[test]
+    fn test_parse_invalid_port_falls_back() {
+        let args = make_args("myapp", &["10.0.0.1", "not-a-port"]);
+        let (ip, port) = parse_ip_port_from_args(&args).unwrap();
+        assert_eq!(ip, "10.0.0.1");
+        assert_eq!(port, 4370);
+    }
+
+    #[test]
+    fn test_parse_missing_ip_returns_err() {
+        let args = make_args("myapp", &[]);
+        let err = parse_ip_port_from_args(&args).unwrap_err();
+        assert!(err.contains("Usage:"));
+        assert!(err.contains("myapp"));
     }
 }

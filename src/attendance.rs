@@ -354,7 +354,9 @@ fn parse_records_8(
             id
         });
 
-        Ok(Attendance::new(uid as u32, user_id, timestamp, status, punch, tz_offset))
+        Ok(Attendance::new(
+            uid as u32, user_id, timestamp, status, punch, tz_offset,
+        ))
     })
 }
 
@@ -382,7 +384,14 @@ fn parse_records_16(
             id
         });
 
-        Ok(Attendance::new(user_id_num, user_id, timestamp, status, punch, tz_offset))
+        Ok(Attendance::new(
+            user_id_num,
+            user_id,
+            timestamp,
+            status,
+            punch,
+            tz_offset,
+        ))
     })
 }
 
@@ -396,25 +405,15 @@ fn parse_records_40(
     bytes_cache: &mut HashMap<[u8; 24], String>,
     tz_offset: i32,
 ) -> ZKResult<()> {
-    let chunk_size = ATT_RECORD_SIZE_40;
-    let mut offset = 0;
-
-    while offset + chunk_size <= data.len() {
-        let chunk = &data[offset..offset + chunk_size];
-        let chunk_ptr;
-
+    parse_records_with(data, record_size, ATT_RECORD_SIZE_40, out, |chunk| {
         // Skip BOM-like prefix if present (e.g., b"\xff255\x00\x00\x00\x00\x00")
-        if chunk.starts_with(b"\xff255\x00\x00\x00\x00\x00") {
-            chunk_ptr = &chunk[10..];
-            if chunk_ptr.len() < 30 {
-                break;
-            }
+        let chunk = if chunk.starts_with(b"\xff255\x00\x00\x00\x00\x00") {
+            &chunk[10..]
         } else {
-            chunk_ptr = chunk;
-        }
+            chunk
+        };
 
-        // Parse one record directly from chunk_ptr
-        let mut rdr = io::Cursor::new(chunk_ptr);
+        let mut rdr = io::Cursor::new(chunk);
         let uid = rdr.read_u16::<byteorder::LittleEndian>()?;
         let mut user_id_bytes = [0u8; 24];
         rdr.read_exact(&mut user_id_bytes)?;
@@ -432,12 +431,10 @@ fn parse_records_40(
             id
         });
 
-        out.push(Attendance::new(
+        Ok(Attendance::new(
             uid as u32, user_id, timestamp, status, punch, tz_offset,
-        ));
-        offset += record_size;
-    }
-    Ok(())
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -543,11 +540,19 @@ mod tests {
         parse_records_with(&data, 8, 8, &mut out, |chunk| {
             let mut rdr = std::io::Cursor::new(chunk);
             let uid = rdr.read_u16::<byteorder::LittleEndian>().unwrap() as u32;
-            Ok(Attendance::new(uid, uid.to_string(),
-                chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
-                    .and_hms_opt(0, 0, 0).unwrap(),
-                1, 0, 420))
-        }).unwrap();
+            Ok(Attendance::new(
+                uid,
+                uid.to_string(),
+                chrono::NaiveDate::from_ymd_opt(2025, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+                1,
+                0,
+                420,
+            ))
+        })
+        .unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].uid(), 101);
     }
@@ -566,11 +571,19 @@ mod tests {
         let mut out = Vec::new();
         parse_records_with(&data, 10, 8, &mut out, |chunk| {
             let uid = chunk[0] as u32 + ((chunk[1] as u32) << 8);
-            Ok(Attendance::new(uid, uid.to_string(),
-                chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
-                    .and_hms_opt(0, 0, 0).unwrap(),
-                1, 0, 420))
-        }).unwrap();
+            Ok(Attendance::new(
+                uid,
+                uid.to_string(),
+                chrono::NaiveDate::from_ymd_opt(2025, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+                1,
+                0,
+                420,
+            ))
+        })
+        .unwrap();
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].uid(), 1);
         assert_eq!(out[1].uid(), 2);
@@ -579,9 +592,7 @@ mod tests {
     #[test]
     fn test_parse_records_with_empty_data() {
         let mut out = Vec::new();
-        parse_records_with(&[], 8, 8, &mut out, |_chunk| {
-            unreachable!()
-        }).unwrap();
+        parse_records_with(&[], 8, 8, &mut out, |_chunk| unreachable!()).unwrap();
         assert!(out.is_empty());
     }
 
@@ -589,9 +600,7 @@ mod tests {
     fn test_parse_records_with_data_smaller_than_chunk() {
         // Data smaller than chunk_size → no iterations
         let mut out = Vec::new();
-        parse_records_with(&[1, 2, 3], 8, 8, &mut out, |_chunk| {
-            unreachable!()
-        }).unwrap();
+        parse_records_with(&[1, 2, 3], 8, 8, &mut out, |_chunk| unreachable!()).unwrap();
         assert!(out.is_empty());
     }
 
@@ -601,7 +610,8 @@ mod tests {
         let mut out = Vec::new();
         let err = parse_records_with(&data, 8, 8, &mut out, |_chunk| {
             Err(ZKError::Response(ZKErrorCode::Other, "test error".into()))
-        }).unwrap_err();
+        })
+        .unwrap_err();
         assert!(matches!(err, ZKError::Response(ZKErrorCode::Other, _)));
     }
 }

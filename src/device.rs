@@ -16,9 +16,7 @@ impl ZK {
         let mut res = self.send_command(CMD_GET_FREE_SIZES, &[])?;
 
         // Handle case where device sends ACK_OK then ACK_DATA/Response separately
-        if res.command() == CMD_ACK_OK
-            && res.payload().len() < SIZES_ACK_FALLBACK_MIN
-        {
+        if res.command() == CMD_ACK_OK && res.payload().len() < SIZES_ACK_FALLBACK_MIN {
             // Try reading the next packet which should contain the actual data
             match self.read_response_safe() {
                 Ok(next_packet) => {
@@ -45,17 +43,14 @@ impl ZK {
                 self.rec_cap = read_sizes_field(data, SIZES_V2_REC_CAP);
 
                 if data.len() >= SIZES_V2_EXT_MIN {
-                    self.faces =
-                        read_sizes_field(data, SIZES_V2_FACES).max(0) as u32;
+                    self.faces = read_sizes_field(data, SIZES_V2_FACES).max(0) as u32;
                     self.faces_cap = read_sizes_field(data, SIZES_V2_FACES_CAP);
                 }
             } else if data.len() >= SIZES_V1_MIN {
                 // Older firmware formats
                 self.users = read_sizes_field(data, SIZES_V1_USERS).max(0) as u32;
-                self.fingers =
-                    read_sizes_field(data, SIZES_V1_FINGERS).max(0) as u32;
-                self.records =
-                    read_sizes_field(data, SIZES_V1_RECORDS).max(0) as u32;
+                self.fingers = read_sizes_field(data, SIZES_V1_FINGERS).max(0) as u32;
+                self.records = read_sizes_field(data, SIZES_V1_RECORDS).max(0) as u32;
                 self.users_cap = read_sizes_field(data, SIZES_V1_USERS_CAP);
                 self.fingers_cap = read_sizes_field(data, SIZES_V1_FINGERS_CAP);
                 self.rec_cap = read_sizes_field(data, SIZES_V1_REC_CAP);

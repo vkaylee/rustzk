@@ -1,11 +1,9 @@
 use rustzk::{ZKProtocol, ZK};
-use std::env;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let ip = args.get(1).expect("IP required");
+    let (ip, port) = rustzk::parse_ip_port();
 
-    let mut zk = ZK::new(ip, 4370);
+    let mut zk = ZK::new(&ip, port);
     if zk.connect(ZKProtocol::Auto).is_ok() {
         let potential_keys = vec!["TZAdj", "~Tz", "StandardTime", "TimeZone", "DayLightTime"];
 

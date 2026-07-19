@@ -207,158 +207,185 @@ impl User {
 
     /// Parses a User from a 28-byte raw chunk.
     pub fn parse_small(chunk: &[u8]) -> ZKResult<Self> {
-        if chunk.len() < USER_PACKET_SIZE_SMALL {
-            return Err(ZKError::InvalidData(
-                crate::ZKErrorCode::InvalidDataFormat,
-                "User small chunk too short".into(),
-            ));
-        }
-        let mut rdr = Cursor::new(chunk);
-        let uid = rdr.read_u16::<LittleEndian>()?;
-        let privilege = rdr.read_u8()?;
-        let mut password_bytes = [0u8; 5];
-        rdr.read_exact(&mut password_bytes)?;
-        let mut name_bytes = [0u8; 8];
-        rdr.read_exact(&mut name_bytes)?;
-        let card = rdr.read_u32::<LittleEndian>()?;
-        let _pad = rdr.read_u8()?;
-        let group_id = rdr.read_u8()?;
-        let _timezone = rdr.read_u16::<LittleEndian>()?;
-        let user_id = rdr.read_u32::<LittleEndian>()?;
-
-        // Decode name (GBK)
-        let name = crate::ZK::decode_gbk(&name_bytes);
-        let password = String::from_utf8_lossy(&password_bytes)
-            .trim_matches('\0')
-            .to_string();
-
-        Ok(User::new(
-            uid,
-            name,
-            privilege,
-            password,
-            group_id.to_string(),
-            user_id.to_string(),
-            card,
-        ))
+        parse_user::<SmallLayout>(chunk)
     }
 
     /// Parses a User from a 72-byte raw chunk.
     pub fn parse_large(chunk: &[u8]) -> ZKResult<Self> {
-        if chunk.len() < USER_PACKET_SIZE_LARGE {
-            return Err(ZKError::InvalidData(
-                crate::ZKErrorCode::InvalidDataFormat,
-                "User large chunk too short".into(),
-            ));
-        }
-        let mut rdr = Cursor::new(chunk);
-        let uid = rdr.read_u16::<LittleEndian>()?;
-        let privilege = rdr.read_u8()?;
-        let mut password_bytes = [0u8; 8];
-        rdr.read_exact(&mut password_bytes)?;
-        let mut name_bytes = [0u8; 24];
-        rdr.read_exact(&mut name_bytes)?;
-        let card = rdr.read_u32::<LittleEndian>()?;
-        let _pad1 = rdr.read_u8()?;
-        let mut group_id_bytes = [0u8; 7];
-        rdr.read_exact(&mut group_id_bytes)?;
-        let _pad2 = rdr.read_u8()?;
-        let mut user_id_bytes = [0u8; 24];
-        rdr.read_exact(&mut user_id_bytes)?;
-
-        // Decode name (GBK)
-        let name = crate::ZK::decode_gbk(&name_bytes);
-        let password = String::from_utf8_lossy(&password_bytes)
-            .trim_matches('\0')
-            .to_string();
-        let group_id = String::from_utf8_lossy(&group_id_bytes)
-            .trim_matches('\0')
-            .to_string();
-        let user_id = String::from_utf8_lossy(&user_id_bytes)
-            .trim_matches('\0')
-            .to_string();
-
-        Ok(User::new(
-            uid, name, privilege, password, group_id, user_id, card,
-        ))
+        parse_user::<LargeLayout>(chunk)
     }
 
     /// Serializes the user into a 28-byte raw vector.
     pub fn to_bytes_small(&self) -> ZKResult<Vec<u8>> {
-        let mut payload = Vec::with_capacity(USER_PACKET_SIZE_SMALL);
-        payload.write_u16::<LittleEndian>(self.uid)?;
-        payload.write_u8(self.privilege)?;
-
-        let mut password_bytes = [0u8; 5];
-        let p_bytes = self.password.as_bytes();
-        let p_len = std::cmp::min(p_bytes.len(), 5);
-        password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
-        payload.write_all(&password_bytes)?;
-
-        let mut name_bytes = [0u8; 8];
-        let n_bytes_gbk = encoding_rs::GBK.encode(&self.name).0;
-        let n_len = std::cmp::min(n_bytes_gbk.len(), 8);
-        name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
-        payload.write_all(&name_bytes)?;
-
-        payload.write_u32::<LittleEndian>(self.card)?;
-        payload.write_u8(0)?; // pad
-        let group_id = self.group_id.parse::<u8>().map_err(|_| {
-            ZKError::InvalidData(
-                crate::ZKErrorCode::InvalidDataFormat,
-                format!("Invalid group_id '{}': must be a u8 integer", self.group_id),
-            )
-        })?;
-        payload.write_u8(group_id)?;
-        payload.write_u16::<LittleEndian>(0)?; // timezone/pad
-        let user_id_num = self.user_id.parse::<u32>().map_err(|_| {
-            ZKError::InvalidData(
-                crate::ZKErrorCode::InvalidDataFormat,
-                format!("Invalid user_id '{}': must be a u32 integer", self.user_id),
-            )
-        })?;
-        payload.write_u32::<LittleEndian>(user_id_num)?;
-
-        Ok(payload)
+        user_to_bytes::<SmallLayout>(self)
     }
 
     /// Serializes the user into a 72-byte raw vector.
     pub fn to_bytes_large(&self) -> ZKResult<Vec<u8>> {
-        let mut payload = Vec::with_capacity(USER_PACKET_SIZE_LARGE);
-        payload.write_u16::<LittleEndian>(self.uid)?;
-        payload.write_u8(self.privilege)?;
-
-        let mut password_bytes = [0u8; 8];
-        let p_bytes = self.password.as_bytes();
-        let p_len = std::cmp::min(p_bytes.len(), 8);
-        password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
-        payload.write_all(&password_bytes)?;
-
-        let mut name_bytes = [0u8; 24];
-        let n_bytes_gbk = encoding_rs::GBK.encode(&self.name).0;
-        let n_len = std::cmp::min(n_bytes_gbk.len(), 24);
-        name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
-        payload.write_all(&name_bytes)?;
-
-        payload.write_u32::<LittleEndian>(self.card)?;
-        payload.write_u8(0)?; // pad1
-
-        let mut group_id_bytes = [0u8; 7];
-        let g_bytes = self.group_id.as_bytes();
-        let g_len = std::cmp::min(g_bytes.len(), 7);
-        group_id_bytes[..g_len].copy_from_slice(&g_bytes[..g_len]);
-        payload.write_all(&group_id_bytes)?;
-
-        payload.write_u8(0)?; // pad2
-
-        let mut user_id_bytes = [0u8; 24];
-        let u_bytes = self.user_id.as_bytes();
-        let u_len = std::cmp::min(u_bytes.len(), 24);
-        user_id_bytes[..u_len].copy_from_slice(&u_bytes[..u_len]);
-        payload.write_all(&user_id_bytes)?;
-
-        Ok(payload)
+        user_to_bytes::<LargeLayout>(self)
     }
+}
+
+// ── User packet layout abstraction (DRY parse/serialize) ──────────────────
+
+/// Private trait abstracting over small (28-byte) and large (72-byte)
+/// user packet wire formats. Each layout specifies field sizes plus
+/// how group_id and user_id are read/written at the byte level.
+trait UserPacketLayout {
+    const PACKET_SIZE: usize;
+    const PASSWORD_LEN: usize;
+    const NAME_LEN: usize;
+
+    fn read_group_id(rdr: &mut Cursor<&[u8]>) -> ZKResult<String>;
+    fn read_user_id(rdr: &mut Cursor<&[u8]>) -> ZKResult<String>;
+
+    fn write_group_id(payload: &mut Vec<u8>, group_id: &str) -> ZKResult<()>;
+    fn write_user_id(payload: &mut Vec<u8>, user_id: &str) -> ZKResult<()>;
+}
+
+struct SmallLayout;
+struct LargeLayout;
+
+impl UserPacketLayout for SmallLayout {
+    const PACKET_SIZE: usize = USER_PACKET_SIZE_SMALL;
+    const PASSWORD_LEN: usize = 5;
+    const NAME_LEN: usize = 8;
+
+    fn read_group_id(rdr: &mut Cursor<&[u8]>) -> ZKResult<String> {
+        let _pad = rdr.read_u8()?;
+        let group_id = rdr.read_u8()?;
+        Ok(group_id.to_string())
+    }
+
+    fn read_user_id(rdr: &mut Cursor<&[u8]>) -> ZKResult<String> {
+        let _timezone = rdr.read_u16::<LittleEndian>()?;
+        let user_id = rdr.read_u32::<LittleEndian>()?;
+        Ok(user_id.to_string())
+    }
+
+    fn write_group_id(payload: &mut Vec<u8>, group_id: &str) -> ZKResult<()> {
+        payload.write_u8(0)?; // pad
+        let id = group_id.parse::<u8>().map_err(|_| {
+            ZKError::InvalidData(
+                crate::ZKErrorCode::InvalidDataFormat,
+                format!("Invalid group_id '{}': must be a u8 integer", group_id),
+            )
+        })?;
+        payload.write_u8(id)?;
+        Ok(())
+    }
+
+    fn write_user_id(payload: &mut Vec<u8>, user_id: &str) -> ZKResult<()> {
+        payload.write_u16::<LittleEndian>(0)?; // timezone/pad
+        let id = user_id.parse::<u32>().map_err(|_| {
+            ZKError::InvalidData(
+                crate::ZKErrorCode::InvalidDataFormat,
+                format!("Invalid user_id '{}': must be a u32 integer", user_id),
+            )
+        })?;
+        payload.write_u32::<LittleEndian>(id)?;
+        Ok(())
+    }
+}
+
+impl UserPacketLayout for LargeLayout {
+    const PACKET_SIZE: usize = USER_PACKET_SIZE_LARGE;
+    const PASSWORD_LEN: usize = 8;
+    const NAME_LEN: usize = 24;
+
+    fn read_group_id(rdr: &mut Cursor<&[u8]>) -> ZKResult<String> {
+        let _pad1 = rdr.read_u8()?;
+        let mut group_id_bytes = [0u8; 7];
+        rdr.read_exact(&mut group_id_bytes)?;
+        Ok(String::from_utf8_lossy(&group_id_bytes)
+            .trim_matches('\0')
+            .to_string())
+    }
+
+    fn read_user_id(rdr: &mut Cursor<&[u8]>) -> ZKResult<String> {
+        let _pad2 = rdr.read_u8()?;
+        let mut user_id_bytes = [0u8; 24];
+        rdr.read_exact(&mut user_id_bytes)?;
+        Ok(String::from_utf8_lossy(&user_id_bytes)
+            .trim_matches('\0')
+            .to_string())
+    }
+
+    fn write_group_id(payload: &mut Vec<u8>, group_id: &str) -> ZKResult<()> {
+        payload.write_u8(0)?; // pad1
+        let mut buf = [0u8; 7];
+        let g_bytes = group_id.as_bytes();
+        let len = std::cmp::min(g_bytes.len(), 7);
+        buf[..len].copy_from_slice(&g_bytes[..len]);
+        payload.write_all(&buf)?;
+        Ok(())
+    }
+
+    fn write_user_id(payload: &mut Vec<u8>, user_id: &str) -> ZKResult<()> {
+        payload.write_u8(0)?; // pad2
+        let mut buf = [0u8; 24];
+        let u_bytes = user_id.as_bytes();
+        let len = std::cmp::min(u_bytes.len(), 24);
+        buf[..len].copy_from_slice(&u_bytes[..len]);
+        payload.write_all(&buf)?;
+        Ok(())
+    }
+}
+
+/// Generic parser: reads a `User` from a raw chunk using layout `L`.
+fn parse_user<L: UserPacketLayout>(chunk: &[u8]) -> ZKResult<User> {
+    if chunk.len() < L::PACKET_SIZE {
+        return Err(ZKError::InvalidData(
+            crate::ZKErrorCode::InvalidDataFormat,
+            "User chunk too short".into(),
+        ));
+    }
+    let mut rdr = Cursor::new(chunk);
+    let uid = rdr.read_u16::<LittleEndian>()?;
+    let privilege = rdr.read_u8()?;
+
+    let mut password_bytes = vec![0u8; L::PASSWORD_LEN];
+    rdr.read_exact(&mut password_bytes)?;
+    let password = String::from_utf8_lossy(&password_bytes)
+        .trim_matches('\0')
+        .to_string();
+
+    let mut name_bytes = vec![0u8; L::NAME_LEN];
+    rdr.read_exact(&mut name_bytes)?;
+    let name = crate::ZK::decode_gbk(&name_bytes);
+
+    let card = rdr.read_u32::<LittleEndian>()?;
+    let group_id = L::read_group_id(&mut rdr)?;
+    let user_id = L::read_user_id(&mut rdr)?;
+
+    Ok(User::new(
+        uid, name, privilege, password, group_id, user_id, card,
+    ))
+}
+
+/// Generic serializer: writes a `User` into a raw vector using layout `L`.
+fn user_to_bytes<L: UserPacketLayout>(user: &User) -> ZKResult<Vec<u8>> {
+    let mut payload = Vec::with_capacity(L::PACKET_SIZE);
+    payload.write_u16::<LittleEndian>(user.uid)?;
+    payload.write_u8(user.privilege)?;
+
+    let mut password_bytes = vec![0u8; L::PASSWORD_LEN];
+    let p_bytes = user.password.as_bytes();
+    let p_len = std::cmp::min(p_bytes.len(), L::PASSWORD_LEN);
+    password_bytes[..p_len].copy_from_slice(&p_bytes[..p_len]);
+    payload.write_all(&password_bytes)?;
+
+    let mut name_bytes = vec![0u8; L::NAME_LEN];
+    let n_bytes_gbk = encoding_rs::GBK.encode(&user.name).0;
+    let n_len = std::cmp::min(n_bytes_gbk.len(), L::NAME_LEN);
+    name_bytes[..n_len].copy_from_slice(&n_bytes_gbk[..n_len]);
+    payload.write_all(&name_bytes)?;
+
+    payload.write_u32::<LittleEndian>(user.card)?;
+    L::write_group_id(&mut payload, &user.group_id)?;
+    L::write_user_id(&mut payload, &user.user_id)?;
+
+    Ok(payload)
 }
 
 /// Represents a fingerprint template.
