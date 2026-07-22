@@ -346,14 +346,12 @@ impl ZK {
             LittleEndian::write_u32(&mut off_bytes, offset);
             table.extend_from_slice(&off_bytes);
 
-            offset = offset
-                .checked_add(tfp.len() as u32)
-                .ok_or_else(|| {
-                    ZKError::InvalidData(
-                        ZKErrorCode::BufferOverflow,
-                        "Total template size exceeds u32 range".into(),
-                    )
-                })?;
+            offset = offset.checked_add(tfp.len() as u32).ok_or_else(|| {
+                ZKError::InvalidData(
+                    ZKErrorCode::BufferOverflow,
+                    "Total template size exceeds u32 range".into(),
+                )
+            })?;
             fpack.extend_from_slice(&tfp);
         }
 

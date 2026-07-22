@@ -196,10 +196,26 @@ fn test_negative_device_fields_clamped_to_zero() {
     assert_eq!(zk.faces(), 0, "Negative faces should be clamped to 0");
     // Capacity fields and cards must also be clamped (regression test for Debt #2 fix)
     assert_eq!(zk.cards(), 0, "Negative cards should be clamped to 0");
-    assert_eq!(zk.users_cap(), 0, "Negative users_cap should be clamped to 0");
-    assert_eq!(zk.fingers_cap(), 0, "Negative fingers_cap should be clamped to 0");
-    assert_eq!(zk.records_cap(), 0, "Negative records_cap should be clamped to 0");
-    assert_eq!(zk.faces_cap(), 0, "Negative faces_cap should be clamped to 0");
+    assert_eq!(
+        zk.users_cap(),
+        0,
+        "Negative users_cap should be clamped to 0"
+    );
+    assert_eq!(
+        zk.fingers_cap(),
+        0,
+        "Negative fingers_cap should be clamped to 0"
+    );
+    assert_eq!(
+        zk.records_cap(),
+        0,
+        "Negative records_cap should be clamped to 0"
+    );
+    assert_eq!(
+        zk.faces_cap(),
+        0,
+        "Negative faces_cap should be clamped to 0"
+    );
 
     server.join().unwrap();
 }

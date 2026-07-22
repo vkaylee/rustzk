@@ -505,7 +505,10 @@ impl fmt::Display for Finger {
         write!(
             f,
             "Finger {{ uid: {}, fid: {}, valid: {}, template_size: {} }}",
-            self.uid, self.fid, self.valid, self.template.len()
+            self.uid,
+            self.fid,
+            self.valid,
+            self.template.len()
         )
     }
 }
@@ -729,8 +732,24 @@ mod tests {
 
     #[test]
     fn test_user_eq_and_display() {
-        let a = User::new(1, "Alice".into(), 14, "123".into(), "1".into(), "101".into(), 0);
-        let b = User::new(1, "Alice".into(), 14, "123".into(), "1".into(), "101".into(), 0);
+        let a = User::new(
+            1,
+            "Alice".into(),
+            14,
+            "123".into(),
+            "1".into(),
+            "101".into(),
+            0,
+        );
+        let b = User::new(
+            1,
+            "Alice".into(),
+            14,
+            "123".into(),
+            "1".into(),
+            "101".into(),
+            0,
+        );
         assert_eq!(a, b);
 
         let display = format!("{}", a);
@@ -750,11 +769,10 @@ mod tests {
 
     #[test]
     fn test_attendance_eq_and_display() {
-        let naive =
-            chrono::NaiveDate::from_ymd_opt(2026, 2, 19)
-                .unwrap()
-                .and_hms_opt(9, 16, 41)
-                .unwrap();
+        let naive = chrono::NaiveDate::from_ymd_opt(2026, 2, 19)
+            .unwrap()
+            .and_hms_opt(9, 16, 41)
+            .unwrap();
         let a = Attendance::new(1, "101".into(), naive, 1, 3, 420);
         let b = Attendance::new(1, "101".into(), naive, 1, 3, 420);
         assert_eq!(a, b);
@@ -769,11 +787,10 @@ mod tests {
 
     #[test]
     fn test_attendance_not_eq_different_status() {
-        let naive =
-            chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
-                .unwrap()
-                .and_hms_opt(0, 0, 0)
-                .unwrap();
+        let naive = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
         let a = Attendance::new(1, "1".into(), naive, 1, 0, 0);
         let b = Attendance::new(1, "1".into(), naive, 2, 0, 0);
         assert_ne!(a, b);

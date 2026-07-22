@@ -106,7 +106,8 @@ impl ZK {
 
         if res.command() == CMD_ACK_UNAUTH {
             // Need authentication
-            let command_string = ZK::make_commkey(self.config.password, self.connection.session_id, 50);
+            let command_string =
+                ZK::make_commkey(self.config.password, self.connection.session_id, 50);
             let auth_res = self.send_command(CMD_AUTH, &command_string)?;
             if auth_res.command() == CMD_ACK_UNAUTH {
                 self.connection.session_id = 0; // Reset dirty session_id on auth failure
@@ -267,9 +268,19 @@ impl ZK {
         );
 
         let packet = if self.connection.use_legacy_checksum {
-            ZKPacket::new_with_legacy(command, self.connection.session_id, self.connection.reply_id, payload)
+            ZKPacket::new_with_legacy(
+                command,
+                self.connection.session_id,
+                self.connection.reply_id,
+                payload,
+            )
         } else {
-            ZKPacket::new(command, self.connection.session_id, self.connection.reply_id, payload)
+            ZKPacket::new(
+                command,
+                self.connection.session_id,
+                self.connection.reply_id,
+                payload,
+            )
         };
 
         self.send_packet(&packet)?;
@@ -479,7 +490,10 @@ impl ZK {
             if res.command() != CMD_ACK_OK {
                 return Err(ZKError::Response(
                     ZKErrorCode::ProtocolViolation,
-                    format!("Device rejected DATA chunk during upload: 0x{:X}", res.command()),
+                    format!(
+                        "Device rejected DATA chunk during upload: 0x{:X}",
+                        res.command()
+                    ),
                 ));
             }
         }
@@ -569,9 +583,19 @@ impl ZK {
             }
 
             let packet = if self.connection.use_legacy_checksum {
-                ZKPacket::new_with_legacy(CMD_EXIT, self.connection.session_id, self.connection.reply_id, &[])
+                ZKPacket::new_with_legacy(
+                    CMD_EXIT,
+                    self.connection.session_id,
+                    self.connection.reply_id,
+                    &[],
+                )
             } else {
-                ZKPacket::new(CMD_EXIT, self.connection.session_id, self.connection.reply_id, &[])
+                ZKPacket::new(
+                    CMD_EXIT,
+                    self.connection.session_id,
+                    self.connection.reply_id,
+                    &[],
+                )
             };
 
             self.send_packet(&packet)?;
@@ -835,10 +859,7 @@ mod tests {
             let _ = tracker.record_empty();
         }
         let err = tracker.record_empty().unwrap_err();
-        assert!(matches!(
-            err,
-            ZKError::Response(ZKErrorCode::Timeout, _)
-        ));
+        assert!(matches!(err, ZKError::Response(ZKErrorCode::Timeout, _)));
     }
 
     #[test]

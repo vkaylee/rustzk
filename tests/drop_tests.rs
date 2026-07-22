@@ -132,9 +132,7 @@ fn test_zk_manual_disconnect_then_drop() {
 
 #[test]
 fn test_zk_double_connect_returns_error() {
-    let (server, port) = MockZKServer::new()
-        .with_session(1234)
-        .spawn();
+    let (server, port) = MockZKServer::new().with_session(1234).spawn();
 
     let mut zk = ZK::new("127.0.0.1", port);
     zk.connect(ZKProtocol::TCP)
